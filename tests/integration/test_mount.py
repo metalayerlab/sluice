@@ -115,6 +115,7 @@ def mounted(tmp_path: Path) -> Iterator[Path]:
     assert not os.path.ismount(mnt)
     text = log.read_text(encoding="utf-8")
     assert "T0k" not in text  # the token is a secret param: masked in every log line
+    assert "Traceback" not in text, text  # no error, including at shutdown
 
 
 def test_multi_tenant_read_write(mounted: Path) -> None:

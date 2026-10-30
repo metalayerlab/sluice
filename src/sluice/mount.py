@@ -10,7 +10,9 @@ import errno
 import logging
 import os
 import signal
+from collections.abc import Callable
 from pathlib import Path
+from types import FrameType
 from typing import cast
 
 from sluice.app import load_app
@@ -87,15 +89,46 @@ def serve(cfg: Config) -> None:
         io.shutdown()
         raise MountError(f"cannot mount at {point}: {e} (libfuse's reason is logged above)") from e
     log.info("serving %s at %s (pid %d)", cfg.app_module, point, os.getpid())
+    stopper = _Stopper(pyfuse3.terminate)
+    # Ours, not the loop's, and never removed: Ctrl-C under `uv run` arrives twice (to the
+    # process group, and forwarded). A second pyfuse3.terminate() raises in pyfuse3.asyncio, and
+    # a signal after asyncio.run() had removed its handlers would kill the unmount or the exit.
+    for sig in _STOP_SIGNALS:
+        signal.signal(sig, stopper.handle)
     try:
-        asyncio.run(_main(cfg.pipeline_slow_ms))
+        asyncio.run(_main(stopper, cfg.pipeline_slow_ms))
     finally:
         pyfuse3.close(unmount=True)
         io.shutdown()
         log.info("unmounted %s", point)
 
 
-async def _main(slow_ms: int) -> None:
+_STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM)
+
+
+class _Stopper:
+    """Ends the FUSE loop on the first stop signal; later ones are ignored."""
+
+    def __init__(self, terminate: Callable[[], None]) -> None:
+        self.terminate = terminate
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.stopping = False
+
+    def handle(self, signum: int, frame: FrameType | None) -> None:
+        if self.stopping:
+            return
+        self.stopping = True
+        log.info("%s: unmounting", signal.Signals(signum).name)
+        if self.loop is not None:
+            self.loop.call_soon_threadsafe(self.terminate)
+
+    def started(self, loop: asyncio.AbstractEventLoop) -> None:
+        self.loop = loop
+        if self.stopping:  # A signal before the loop existed
+            loop.call_soon(self.terminate)
+
+
+async def _main(stopper: _Stopper, slow_ms: int) -> None:
     import pyfuse3
 
     loop = asyncio.get_running_loop()
@@ -103,6 +136,5 @@ async def _main(slow_ms: int) -> None:
         # asyncio's debug mode logs any step that holds the loop longer than this.
         loop.slow_callback_duration = slow_ms / 1000
         loop.set_debug(True)
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, pyfuse3.terminate)
+    stopper.started(loop)
     await pyfuse3.main()

@@ -65,3 +65,40 @@ def test_prepare_loads_app_and_logs_secret_names(
     assert table.resolve("/x/y") is not None
     assert "api_key" in caplog.text
     assert "s3cr3t" not in caplog.text
+
+
+def test_stopper_terminates_once() -> None:
+    import asyncio
+    import signal
+
+    from sluice.mount import _Stopper
+
+    calls: list[int] = []
+    stopper = _Stopper(lambda: calls.append(1))
+
+    async def go() -> None:
+        stopper.started(asyncio.get_running_loop())
+        stopper.handle(signal.SIGTERM, None)
+        stopper.handle(signal.SIGINT, None)
+        await asyncio.sleep(0)
+
+    asyncio.run(go())
+    assert calls == [1]
+
+
+def test_stopper_signal_before_loop() -> None:
+    import asyncio
+    import signal
+
+    from sluice.mount import _Stopper
+
+    calls: list[int] = []
+    stopper = _Stopper(lambda: calls.append(1))
+    stopper.handle(signal.SIGINT, None)
+
+    async def go() -> None:
+        stopper.started(asyncio.get_running_loop())
+        await asyncio.sleep(0)
+
+    asyncio.run(go())
+    assert calls == [1]
