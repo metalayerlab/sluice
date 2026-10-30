@@ -8,3 +8,4 @@ Approved (by a human) → Implemented; supersede an implemented record with a ne
 
 | # | Title | Status | Decision in one line |
 |---|---|---|---|
+| [0001](0001-initial-design.md) | Initial design | Approved | pyfuse3 mount with a Python-defined route tree (own / inherited / virtual backends), phase-structured pre/post middleware, mount-time env and secrets; CLI `mount`, `routes`, `resolve`; no HTTP. |
