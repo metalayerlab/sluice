@@ -25,6 +25,36 @@ log = logging.getLogger(__name__)
 
 Operation = Callable[["Context"], Awaitable[Any]]
 
+# The operations middleware sees. forget, release and releasedir bypass it: they are bookkeeping
+# the kernel can't act on the failure of.
+OPS = frozenset(
+    {
+        "lookup",
+        "getattr",
+        "setattr",
+        "readlink",
+        "mkdir",
+        "rmdir",
+        "unlink",
+        "symlink",
+        "rename",
+        "open",
+        "create",
+        "read",
+        "write",
+        "flush",
+        "fsync",
+        "opendir",
+        "readdir",
+        "statfs",
+        "access",
+        "getxattr",
+        "setxattr",
+        "listxattr",
+        "removexattr",
+    }
+)
+
 
 class Middleware:
     """Subclass and override any of the three hooks; `ops` limits which operations it sees."""
@@ -71,6 +101,9 @@ def as_middleware(obj: object, where: str) -> Middleware:
     if isinstance(obj, Middleware):
         for hook in ("pre", "post", "failed"):
             check_coroutine(getattr(obj, hook), f"{where}: {obj!r}.{hook}")
+        unknown = sorted((obj.ops or frozenset()) - OPS)
+        if unknown:
+            raise RouteError(f"{where}: {obj!r}.ops has unknown ops: {', '.join(unknown)}")
         return obj
     if callable(obj):
         check_coroutine(obj, where)

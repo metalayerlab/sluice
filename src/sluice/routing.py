@@ -243,6 +243,14 @@ class Resolution:
         return self.kind == "virtual"
 
 
+@dataclass(frozen=True)
+class WalkedRoute:
+    depth: int
+    node: Node
+    state: str  # The backend state: own, inherited from, virtual or grouping
+    middlewares: tuple[Middleware, ...]  # The full chain, global first
+
+
 _Match = tuple[int, dict[str, str], list[tuple[str, int, int]]]
 
 
@@ -353,11 +361,14 @@ class RouteTable:
             return base
         return None
 
-    def walk(self) -> list[tuple[int, Node, str]]:
-        """Every route, depth first: (depth, node, backend state) for `sluice routes`."""
-        out: list[tuple[int, Node, str]] = []
+    def walk(self) -> list[WalkedRoute]:
+        """Every route, depth first, for `sluice routes`."""
+        out: list[WalkedRoute] = []
 
-        def visit(node: Node, depth: int, inherited: str | None) -> None:
+        def visit(
+            node: Node, depth: int, inherited: str | None, chain: tuple[Middleware, ...]
+        ) -> None:
+            chain = (*chain, *node.middlewares)
             if node.virtual:
                 state, inherited = "virtual", None
             elif node.template is not None:
@@ -367,12 +378,12 @@ class RouteTable:
                 state = inherited
             else:
                 state = "grouping"
-            out.append((depth, node, state))
+            out.append(WalkedRoute(depth, node, state, chain))
             for child in node.children:
-                visit(child, depth + 1, inherited)
+                visit(child, depth + 1, inherited, chain)
 
         for child in self.root.children:
-            visit(child, 0, None)
+            visit(child, 0, None, self.root.middlewares)
         return out
 
 

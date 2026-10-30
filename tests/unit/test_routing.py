@@ -3,12 +3,24 @@ from pathlib import Path
 
 import pytest
 
-from sluice import Context, FsError, MountConfig, RouteError, Sluice, VirtualHandler
+from sluice import (
+    Context,
+    FsError,
+    Middleware,
+    MountConfig,
+    RouteError,
+    Sluice,
+    VirtualHandler,
+)
 from sluice.routing import Kind, parse_pattern
 
 
 class Status(VirtualHandler):
     pass
+
+
+class Typo(Middleware):
+    ops = frozenset({"Read"})
 
 
 async def ok(ctx: Context) -> None:
@@ -199,6 +211,7 @@ def test_dotdot_within_the_backend_is_fine() -> None:
         (lambda a: (a.route("/a/{x}"), a.route("/a/{y}")), "same shape"),
         (lambda a: a.route("/m", middlewares=[lambda ctx: None]), "async"),
         (lambda a: a.route("/m", middlewares=[42]), "not middleware"),
+        (lambda a: a.route("/m", middlewares=[Typo()]), "unknown ops: Read"),
         (lambda a: a.param("p", lambda ctx, raw: raw), "async"),
     ],
 )
@@ -218,16 +231,18 @@ def test_secret_param_in_backend_is_refused() -> None:
 
 
 def test_walk_reports_backend_states() -> None:
-    states = [(d, n.route.full_pattern, s) for d, n, s in tenant_app().freeze().walk()]
+    walked = tenant_app().freeze().walk()
+    states = [(w.depth, w.node.route.full_pattern, w.state) for w in walked]
     assert states == [
         (0, "/fuse/{user}/{token}", "backend /ext4/{user}"),
         (1, "/fuse/{user}/{token}/private", "inherits /ext4/{user} from /fuse/{user}/{token}"),
         (1, "/fuse/{user}/{token}/status", "virtual"),
         (0, "/fuse/{project}/config.yaml", "virtual"),
     ]
+    assert [len(w.middlewares) for w in walked] == [1, 2, 1, 0]
 
 
 def test_walk_grouping() -> None:
     app = Sluice()
     app.route("/g").route("v", virtual=True, handler=Status()).route("under")
-    assert [s for _, _, s in app.freeze().walk()] == ["grouping", "virtual", "grouping"]
+    assert [w.state for w in app.freeze().walk()] == ["grouping", "virtual", "grouping"]
