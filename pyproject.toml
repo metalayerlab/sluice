@@ -19,6 +19,11 @@ Homepage = "https://github.com/metalayerlab/sluice"
 Documentation = "https://github.com/metalayerlab/sluice/wiki"
 Changelog = "https://github.com/metalayerlab/sluice/blob/main/CHANGELOG.md"
 
+[project.optional-dependencies]
+fuse = [
+    "pyfuse3>=3.5.0",
+]
+
 [dependency-groups]
 dev = [
     "mypy>=1.15",
@@ -50,6 +55,12 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "S", "T20"]
 [tool.mypy]
 strict = true
 files = ["src/sluice", "tests", "scripts"]
+
+[[tool.mypy.overrides]]
+# pyfuse3 is the optional `fuse` extra (design 0001, question 10): CI installs without it, and
+# only fs.py and mount.py import it. Where it is installed, its own types are checked.
+module = ["pyfuse3", "pyfuse3.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers --strict-config --cov --cov-report=term-missing:skip-covered"
