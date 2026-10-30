@@ -63,8 +63,42 @@ Print the version.
 
 | Code | Meaning |
 |---|---|
-| 0 | Success |
-| 1 | Failure while running |
-| 2 | Bad usage or invalid configuration |
+| 0 | Success. For `mount`: unmounted cleanly after SIGINT, SIGTERM or `fusermount3 -u`. |
+| 1 | An unexpected error: a bug in sluice or the app. The traceback is logged. |
+| 2 | An expected error, printed as one `error: ...` line: bad usage, invalid configuration, the app can't be imported, the routes don't validate, or the filesystem can't be mounted. |
 
-<!-- guidance: add project-specific exit codes, and worked examples of common invocations. -->
+A single failed filesystem call never ends the mount: the caller gets an errno, and sluice carries on.
+
+## Examples
+
+Check an app's routes, and see what each route inherits and which middleware runs beneath it:
+
+```console
+$ SLUICE_APP_MODULE=myroutes:app sluice routes
+/home/{user}/{token}  [backend /srv/data/{user}]
+  middleware: access_log(), auth(verify)
+  /home/{user}/{token}/status  [virtual]
+    middleware: access_log(), auth(verify)
+```
+
+Find out where a path goes, and what would run for a `read`, without mounting or running any middleware:
+
+```console
+$ sluice resolve /home/alice/T0k/notes.txt --op read
+path:       /home/alice/********/notes.txt
+route:      /home/{user}/{token}
+kind:       backed
+params:     user=alice, token=********
+real path:  /srv/data/alice/notes.txt
+param():    (none)
+middleware: access_log(), auth(verify)  (for read)
+```
+
+A path that no route covers prints `no route: ENOENT`, and one that would leave its backend prints `refused: EACCES: path escapes its backend`. Both exit 0: the dry run worked.
+
+Mount in the foreground with a config file, and unmount a mount whose process died:
+
+```sh
+sluice mount -c /etc/sluice/config.yaml
+fusermount3 -u /mnt/sluice
+```

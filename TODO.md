@@ -5,9 +5,8 @@ the team (and its AI assistants) should know at a glance.
 
 ## Open
 
-- [ ] Implement docs/design/0001-initial-design.md (approved; docs/ai/prompts.md, prompt 1 step 2)
+- [ ] Verify the container recipe in the wiki's Deployment page (image build and a mount inside Docker), then remove its `TODO(wiki)` marker (a Release PR is blocked until then)
 - [ ] Remove the Dockerfile's libfuse3 apt workaround, and add an integration job to CI, once metalayerlab/project-template#53 (system-packages hook) lands; design 0001, question 10
-- [ ] Replace every `<!-- guidance -->` comment in docs/wiki/ (a Release PR is blocked until then)
 
 ## Decided against (don't re-propose without reading this first)
 

@@ -1,6 +1,6 @@
 # 0001: Initial design
 
-Status: Approved
+Status: Implemented
 Date: 2026-10-30
 Authors: Stephen Cox; drafted by Claude
 

@@ -12,12 +12,13 @@
 
 ### 📖 Core Concepts
 
-<!-- Project pages go here, e.g. - [How Matching Works](How-Matching-Works) -->
+- [Writing an App](Writing-an-App)
 - [CLI Reference](CLI-Reference)
 
 ### 🔧 Configuration
 
 - [In-Depth Configuration](In-Depth-Configuration)
+- [Deployment](Deployment)
 
 ### 🔒 Security
 
@@ -39,7 +40,11 @@
 
 ### 🔑 Key Features
 
-<!-- guidance: three to five one-line features, each starting with an emoji. -->
+- 🧭 Express-style routes: params, prefixes, own, inherited or virtual backends
+- 🚦 Async `pre`/`post` middleware on every filesystem call
+- ✨ Virtual files generated per open, never on disk
+- 🔐 Mount-time secrets and token params, masked in every log
+- 🔍 `sluice routes` and `sluice resolve`: dry runs without mounting
 
 ---
 

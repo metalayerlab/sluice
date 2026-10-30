@@ -6,7 +6,7 @@
 
 ```sh
 git clone https://github.com/metalayerlab/sluice && cd sluice
-uv sync                                  # Python >= 3.13: uv fetches it if needed
+uv sync --extra fuse                     # Python >= 3.13; pyfuse3 needs libfuse3-dev, pkg-config, gcc
 uv tool install pre-commit && pre-commit install -t pre-commit -t commit-msg
 uv run pytest                            # all green before you start
 ```
@@ -29,7 +29,15 @@ Never edit `CHANGELOG.md` or the version, and never push tags: release-please do
 - Settings go through `config.SETTINGS`. Secrets come from `_FILE`, and are never logged.
 - Prefer the standard library and existing dependencies. Justify every new one in the PR.
 
-<!-- guidance: project-specific rules (concurrency model, error types, naming), the kind of thing a reviewer keeps repeating. -->
+Rules specific to sluice:
+
+- **Never block the event loop.** One asyncio loop serves every FUSE call. Backend syscalls go through `Passthrough.run()` (the worker pool). Nothing in `dispatch.py`, `middleware.py` or a handler does synchronous I/O.
+- **pyfuse3 stays in `fs.py` and `mount.py`.** Everything else must import and be tested without it, because CI has no libfuse. `fs.py` converts and does nothing else: logic goes in the dispatcher.
+- **Errors for one call are `FsError(errno)` or `Deny`.** Never let another exception escape to pyfuse3: it would stop the mount. Startup errors are `ConfigError`, `AppLoadError`, `RouteError` or `MountError`, with a one-line message that names the setting or route pattern.
+- **Mask what is secret.** Log `ctx.display_path`, never `ctx.path` or raw params. Never log a `Secret`'s `.reveal()`. The integration test fails if a token reaches the daemon's log.
+- **No `ENOSYS` from defaults.** The kernel remembers it for the whole mount (see [Architecture Internals](Architecture-Internals#design-decisions)).
+- **Operation names** are the FUSE names (`getattr`, `readdir`, ...), listed in `middleware.OPS`. A new op is added there, in the dispatcher, in `fs.py`, and in both `VirtualHandler` and `Passthrough`.
+- **Run the integration tests** (`uv sync --extra fuse`, `RUN_INTEGRATION=1`) before a PR that touches `fs.py`, `mount.py` or the dispatcher. CI can't. See [Testing Guide](Testing-Guide).
 
 ## Working with AI assistants
 
