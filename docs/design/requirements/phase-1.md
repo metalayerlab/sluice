@@ -108,7 +108,7 @@ Both are expressed as "events" but serve structurally different purposes and mus
 
 ```python
 route(pattern, backend=None, virtual=False, middlewares=[...])
-use([mw1, mw2, ...])            # global, unscoped, runs on every call
+use([mw1, mw2, ...])  # global, unscoped, runs on every call
 ```
 
 `use(prefix, [mw])` (prefix-mounted, Express-style) is a possible second form — **open question**, see §9.
@@ -137,8 +137,8 @@ A route's backend resolution has three possible states, and they must be represe
 @dataclass
 class Route:
     pattern: str
-    backend: Optional[str] = None     # case 1 if set
-    virtual: bool = False             # case 3 — explicit opt-out of inheritance
+    backend: Optional[str] = None  # case 1 if set
+    virtual: bool = False  # case 3 — explicit opt-out of inheritance
     middlewares: list = field(default_factory=list)
 ```
 

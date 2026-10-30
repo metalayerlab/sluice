@@ -15,7 +15,11 @@ from sluice import __version__
 from sluice.config import CONFIG_ENV, SETTINGS, Config, ConfigError, load_config
 
 app = typer.Typer(
-    help="Sluice — a Python FUSE filesystem with an Express-style router that gates, rewrites, and middleware-intercepts every filesystem call between virtual paths and their backing stores.",
+    help=(
+        "Sluice — a Python FUSE filesystem with an Express-style router that gates, rewrites,"
+        " and middleware-intercepts every filesystem call between virtual paths and their"
+        " backing stores."
+    ),
     no_args_is_help=True,
     add_completion=False,
     pretty_exceptions_enable=False,

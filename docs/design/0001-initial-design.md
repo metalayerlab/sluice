@@ -72,12 +72,12 @@ Routes are defined in Python, in a module the user names with `app.module` (like
 from sluice import Sluice, access_log, auth
 
 app = Sluice()
-app.use(access_log())                              # global, every call
-app.param("token", decode_token, secret=True)      # once per request; value redacted in logs
+app.use(access_log())  # global, every call
+app.param("token", decode_token, secret=True)  # once per request; value redacted in logs
 
 user = app.route("/fuse/{user}/{token}", backend="/ext4/{user}", middlewares=[auth(verify)])
-user.route("private", middlewares=[admin_only])    # case 2: inherits /ext4/{user}
-user.route("status", virtual=True, handler=StatusHandler())   # case 3: no backing
+user.route("private", middlewares=[admin_only])  # case 2: inherits /ext4/{user}
+user.route("status", virtual=True, handler=StatusHandler())  # case 3: no backing
 app.route("/fuse/{project}/config.yaml", virtual=True, handler=ConfigTemplate())
 ```
 
@@ -134,10 +134,10 @@ Recommended answer to requirements open question 2 (see [Open questions](#open-q
 
 ```python
 class Middleware:
-    ops: frozenset[str] | None = None              # None = every op; else only these
+    ops: frozenset[str] | None = None  # None = every op; else only these
 
     async def pre(self, ctx: Context) -> None: ...  # inspect, mutate ctx.args, raise to deny
-    async def post(self, ctx: Context, result: R) -> R: ...   # inspect or replace the result
+    async def post(self, ctx: Context, result: R) -> R: ...  # inspect or replace the result
     async def failed(self, ctx: Context, error: FsError) -> None: ...  # observe a failure
 ```
 
