@@ -1,4 +1,8 @@
-"""Sluice — a Python FUSE filesystem with an Express-style router that gates, rewrites, and middleware-intercepts every filesystem call between virtual paths and their backing stores."""
+"""Sluice — a Python FUSE filesystem with an Express-style router.
+
+It gates, rewrites, and middleware-intercepts every filesystem call between virtual paths and
+their backing stores.
+"""
 
 from importlib.metadata import PackageNotFoundError, version
 
