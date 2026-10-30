@@ -6,7 +6,7 @@ the team (and its AI assistants) should know at a glance.
 ## Open
 
 - [ ] Implement docs/design/0001-initial-design.md (approved; docs/ai/prompts.md, prompt 1 step 2)
-- [ ] Open a project-template issue: a system-packages hook for CI and the Docker builder (pyfuse3 needs libfuse3-dev); design 0001, question 10
+- [ ] Remove the Dockerfile's libfuse3 apt workaround, and add an integration job to CI, once metalayerlab/project-template#53 (system-packages hook) lands; design 0001, question 10
 - [ ] Replace every `<!-- guidance -->` comment in docs/wiki/ (a Release PR is blocked until then)
 
 ## Decided against (don't re-propose without reading this first)
