@@ -1,3 +1,4 @@
+import errno
 from pathlib import Path
 
 import pytest
@@ -28,10 +29,10 @@ def test_unreadable_mountpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     point = tmp_path / "mnt"
     point.mkdir()
 
-    def stale(self: Path) -> None:
-        raise OSError(107, "Transport endpoint is not connected")
+    def stale(self: Path, **kwargs: object) -> None:
+        raise OSError(errno.ENOTCONN, "Transport endpoint is not connected")
 
-    monkeypatch.setattr(Path, "iterdir", stale)
+    monkeypatch.setattr(Path, "stat", stale)
     with pytest.raises(MountError, match="fusermount3 -u"):
         check_mountpoint(str(point), tmp_path)
 

@@ -10,6 +10,7 @@ import errno
 import logging
 import os
 import signal
+import stat
 from collections.abc import Callable
 from pathlib import Path
 from types import FrameType
@@ -42,14 +43,19 @@ def check_mountpoint(point: str, device: Path = FUSE_DEVICE) -> Path:
     if not point:
         raise MountError("mount.point is not set")
     path = Path(point)
-    if not path.is_dir():
-        raise MountError(f"mount.point: {path} is not an existing directory")
     try:
-        if any(path.iterdir()):
-            raise MountError(f"mount.point: {path} is not empty")
+        # Not Path.is_dir(): it hides ENOTCONN, the sign of a stale mount, as "not a directory".
+        is_dir = stat.S_ISDIR(path.stat().st_mode)
+        empty = is_dir and not any(path.iterdir())
+    except FileNotFoundError:
+        is_dir = empty = False
     except OSError as e:
         hint = " (a stale mount? try fusermount3 -u)" if e.errno == errno.ENOTCONN else ""
         raise MountError(f"mount.point: cannot read {path}: {e.strerror}{hint}") from e
+    if not is_dir:
+        raise MountError(f"mount.point: {path} is not an existing directory")
+    if not empty:
+        raise MountError(f"mount.point: {path} is not empty")
     if not device.exists():
         raise MountError(f"{device} not found: load the fuse module, or give the container it")
     return path
