@@ -1,0 +1,10 @@
+# sluice configuration: every setting, with its default.
+#
+# Copy to /etc/sluice/config.yaml (or point SLUICE_CONFIG / --config
+# at it). Every key can also be set as an environment variable,
+# SLUICE_<KEY> (dots become underscores), or read from a file with
+# SLUICE_<KEY>_FILE. Secrets belong in _FILE, never in this file.
+# Full reference: the wiki's In-Depth-Configuration page.
+
+# DEBUG, INFO, WARNING or ERROR
+log_level: INFO

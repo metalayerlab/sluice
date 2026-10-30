@@ -1,0 +1,52 @@
+# Only what the Dockerfile copies needs to be in the build context.
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.graphify/
+graphify-out/
+
+# IDEs and AI assistants
+.vscode/
+.idea/
+.cursor/
+.claude/
+*.swp
+*~
+
+# Not needed in the image
+tests/
+scripts/
+docs/
+*.md
+!README.md
+contrib/docker/
+contrib/k8s/
+contrib/systemd/
+.github/
+
+# Secrets and local state: never in an image
+.env
+.env.*
+secrets/
+data/
+*.log
+.DS_Store

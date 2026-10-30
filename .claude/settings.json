@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "attribution": {"commit": "", "pr": "", "sessionUrl": false},
+  "permissions": {
+    "allow": [
+      "Bash(uv sync:*)",
+      "Bash(uv run ruff:*)",
+      "Bash(uv run mypy:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run scripts/gen-wiki.py:*)",
+      "Bash(uv run sluice:*)",
+      "Bash(scripts/check-manifests.sh)",
+      "Bash(python3 scripts/check-wiki.py:*)",
+      "Bash(scripts/check-docs-secrets.sh:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ],
+    "deny": [
+      "Edit(CHANGELOG.md)",
+      "Edit(.release-please-manifest.json)",
+      "Edit(.copier-answers.yml)",
+      "Bash(git push:*)",
+      "Bash(git tag:*)",
+      "Bash(gh release:*)",
+      "Read(./uv.lock)",
+      "Read(./.venv/**)",
+      "Read(./htmlcov/**)",
+      "Read(./.mypy_cache/**)",
+      "Read(./.ruff_cache/**)",
+      "Read(./.pytest_cache/**)",
+      "Read(./.graphify/**)",
+      "Read(./graphify-out/**)",
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(secrets/**)"
+    ]
+  }
+}

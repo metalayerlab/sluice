@@ -1,0 +1,8 @@
+# Every change needs a review from a code owner (turn on "Require review from
+# Code Owners" in branch protection). AI-generated changes are no exception.
+*                       @metalayerlab/maintainers
+
+# Template-owned files: change them in project-template, not here.
+/.github/workflows/     @metalayerlab/maintainers
+/scripts/check-wiki.py  @metalayerlab/maintainers
+/docs/wiki/.standard.toml @metalayerlab/maintainers

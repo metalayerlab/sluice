@@ -1,0 +1,42 @@
+# Template-owned. The same checks as CI, before each commit:
+#   uv tool install pre-commit && pre-commit install -t pre-commit -t commit-msg
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+      - id: mypy
+        name: mypy
+        entry: uv run mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: gen-wiki
+        name: generated wiki sections
+        entry: uv run scripts/gen-wiki.py --check
+        language: system
+        pass_filenames: false
+        files: ^(src/|docs/wiki/)
+      - id: check-wiki
+        name: wiki standard
+        entry: python3 scripts/check-wiki.py
+        language: system
+        pass_filenames: false
+        files: ^docs/wiki/
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]

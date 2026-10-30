@@ -1,0 +1,68 @@
+# The wiki standard: the pages every project keeps in docs/wiki/, and the
+# headings each must have. Checked by scripts/check-wiki.py in CI.
+#
+# Template-owned: change it in project-template (and its Project-Wiki-Standard
+# page), never here. Projects add pages of their own freely: every page just
+# has to be linked from _Sidebar.md.
+version = 1
+
+[pages.Home]
+headings = ["Table of Contents"]
+
+[pages.Introduction]
+headings = ["What it is", "How it works", "When not to use it"]
+
+[pages.Quick-Start]
+headings = ["Prerequisites", "Install", "First run", "Next steps"]
+
+[pages.In-Depth-Configuration]
+headings = ["Where configuration comes from", "Settings", "Secrets", "Examples"]
+
+[pages.CLI-Reference]
+headings = ["Commands", "Exit codes"]
+
+[pages.Architecture-Internals]
+headings = ["Overview", "Components", "Data flow", "Design decisions"]
+
+[pages.Security]
+headings = ["Threat model", "Secrets", "Hardening", "Reporting a vulnerability"]
+
+[pages.Testing-Guide]
+headings = ["Running the tests", "Test layout", "Writing tests"]
+
+[pages.Release-Process]
+headings = ["Versioning", "How a release happens", "Pre-releases and hotfixes"]
+
+[pages.Contributing]
+headings = ["Development setup", "Workflow", "Code style", "Working with AI assistants", "Documentation"]
+
+[pages.Troubleshooting]
+headings = ["Diagnostics", "Common problems"]
+
+[pages.Frequently-Asked-Questions]
+headings = []
+
+[pages._Sidebar]
+headings = []
+
+[pages._Footer]
+headings = []
+
+# What AI assistants load every session, in characters (~4 per token). Template-owned:
+# raising a budget is a change to project-template (its design records 0002 and 0006), never local.
+# Keep rules in AGENTS.md and reasons in the wiki.
+[context_budget]
+"AGENTS.md" = 9000
+"CLAUDE.md" = 600
+"GEMINI.md" = 300
+".cursor/rules/project.mdc" = 300
+".github/copilot-instructions.md" = 700
+
+# A PR that changes one of these paths must change docs/wiki/ too, unless a
+# reviewer adds the no-docs-needed label (fnmatch patterns: * spans directories).
+[docs_touched]
+watch = [
+  "src/*/config.py",
+  "src/*/cli.py",
+  "Dockerfile",
+]

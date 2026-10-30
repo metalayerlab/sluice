@@ -1,0 +1,112 @@
+# Template-owned: change it in project-template and pull it in with `copier update`.
+# Every job blocks the merge (make them required checks in branch protection).
+name: CI
+
+# Branches are checked through their PR: pushing to a branch with an open PR
+# would otherwise run every job twice.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # Allow-list false positives in .gitleaks.toml, never by disabling the job.
+      # The image and arguments live in the script, so a local run matches this one.
+      - name: gitleaks
+        run: scripts/check-docs-secrets.sh secrets
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      - name: Install (from the lock file)
+        run: uv sync --locked
+
+      - name: Lint
+        run: uv run ruff check
+
+      - name: Format
+        run: uv run ruff format --check
+
+      - name: Type check
+        run: uv run mypy
+
+      - name: Tests (with coverage floor)
+        run: uv run pytest
+
+      - name: Import and entry-point smoke test
+        run: |
+          uv run python -c "import sluice; print('sluice', sluice.__version__)"
+          uv run sluice --help > /dev/null
+
+      - name: Generated wiki sections are current
+        if: matrix.python-version == '3.13'
+        run: uv run scripts/gen-wiki.py --check
+
+  version:
+    name: Version and lock file
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - name: Version is PEP 440 and matches the release manifest
+        run: |
+          VERSION=$(grep -oP '^version = "\K[^"]+' pyproject.toml)
+          MANIFEST=$(python3 -c 'import json; print(json.load(open(".release-please-manifest.json"))["."])')
+          echo "pyproject: $VERSION, manifest: $MANIFEST"
+          echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?$' \
+            || { echo "::error file=pyproject.toml::version $VERSION is not PEP 440"; exit 1; }
+          [ "$VERSION" = "$MANIFEST" ] \
+            || { echo "::error::pyproject.toml ($VERSION) and .release-please-manifest.json ($MANIFEST) disagree: only release-please changes them"; exit 1; }
+      - name: uv.lock is in sync with pyproject.toml
+        run: uv lock --check
+
+  manifests:
+    name: Dockerfile and contrib manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install validators
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/hadolint" \
+            https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-linux-x86_64
+          chmod +x "$HOME/.local/bin/hadolint"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Validate
+        run: scripts/check-manifests.sh
+
+  workflows:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color

@@ -1,0 +1,11 @@
+# gitleaks: the default rules, plus allow-listed false positives. Add an entry
+# with a comment saying why, never a blanket path.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known non-secrets"
+paths = [
+  # lock files: integrity hashes look like secrets
+  '''(^|/)(uv\.lock|pnpm-lock\.yaml|package-lock\.json)$''',
+]

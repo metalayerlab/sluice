@@ -1,0 +1,84 @@
+# Template-owned. Weekly: pull project-template's latest release into this repo
+# with `copier update` and open (or refresh) a PR. Conflicts are left inline as
+# <<<<<<< markers for the reviewer. See project-template's Updating-from-the-Template page.
+#
+# Uses the release GitHub App when RELEASE_APP_CLIENT_ID is set (so CI runs on
+# the PR, a private template can be read, and workflow files can be pushed).
+# GITHUB_TOKEN can't push changes to .github/workflows/, so without the App an
+# update that touches them opens an issue asking for a local `copier update`.
+name: Template update
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - id: app-token
+        if: vars.RELEASE_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+
+      - name: copier update
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          HAS_APP: ${{ steps.app-token.outcome == 'success' }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          before=$(grep '^_commit:' .copier-answers.yml)
+          uvx --from 'copier>=9.6,<10' copier update --trust --defaults --conflict inline
+          after=$(grep '^_commit:' .copier-answers.yml)
+          echo "FROM=${before#_commit: }" >> "$GITHUB_ENV"
+          echo "TO=${after#_commit: }" >> "$GITHUB_ENV"
+          if [ "$HAS_APP" != true ] && [ -n "$(git status --porcelain .github/workflows)" ]; then
+            echo "NEEDS_LOCAL=1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Ask for a local update (no App, workflow files changed)
+        if: env.NEEDS_LOCAL == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="chore: update from project-template ${TO} (run locally)"
+          body="project-template **${FROM}** → **${TO}** changes \`.github/workflows/\`, which \`GITHUB_TOKEN\` can't push. Run \`uvx copier update --trust --conflict inline\` locally and open the PR, or set up the release GitHub App (project-template wiki: Release-Process)."
+          n=$(gh issue list --label template-update --state open --json number -q '.[0].number')
+          if [ -n "$n" ]; then gh issue edit "$n" --title "$title" --body "$body"
+          else gh issue create --label template-update --title "$title" --body "$body"; fi
+
+      - if: env.NEEDS_LOCAL != '1'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
+          branch: chore/template-update
+          delete-branch: true
+          commit-message: "chore: update from project-template ${{ env.TO }}"
+          title: "chore: update from project-template ${{ env.TO }}"
+          labels: template-update
+          body: |
+            `copier update` from project-template **${{ env.FROM }}** to **${{ env.TO }}**.
+
+            - Search the diff for `<<<<<<<`: conflicts are left inline for you to resolve.
+            - Read the template's CHANGELOG for what changed and why.
+            - Pages under `docs/wiki/` (except Release-Process) and `src/`, `tests/` are
+              yours and never touched; `docs/wiki/.standard.toml` may have changed, so
+              the Wiki check may now ask for something new.

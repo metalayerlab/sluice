@@ -1,0 +1,83 @@
+# Template-owned. The project wiki lives in docs/wiki/ and is reviewed with the
+# code; this checks it and mirrors it, one way, to the GitHub wiki. Never edit
+# the GitHub wiki directly: the next publish overwrites it.
+# See the wiki's Contributing page and project-template's Project-Wiki-Standard.
+name: Wiki
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Wiki standard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+
+      # Release PRs are strict: nothing ships while a page still holds skeleton guidance.
+      - name: Structure, headings, sidebar, links
+        run: |
+          if [ "${{ startsWith(github.head_ref, 'release-please--') }}" = "true" ]; then
+            python3 scripts/check-wiki.py --strict
+          else
+            python3 scripts/check-wiki.py
+          fi
+
+      # The image, globs and config live in the script, so a local run matches this one.
+      - name: Markdown lint
+        run: scripts/check-docs-secrets.sh docs
+
+  docs-touched:
+    name: Docs updated with the code
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'no-docs-needed') && !startsWith(github.head_ref, 'release-please--')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Watched paths changed without a docs/wiki/ change?
+        run: python3 scripts/check-wiki.py --docs-touched "origin/${{ github.base_ref }}"
+
+  publish:
+    name: Publish to the GitHub wiki
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The wiki repository exists only once its first page has been created in
+      # the web UI (one-off; see Quick-Start in project-template's wiki).
+      - name: Mirror docs/wiki/ to ${{ github.repository }}.wiki
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          url="https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git"
+          if ! git clone --depth 1 "$url" "$RUNNER_TEMP/wiki"; then
+            echo "::error::No wiki repository yet: enable the wiki and create its first page once in the web UI"
+            exit 1
+          fi
+          cd "$RUNNER_TEMP/wiki"
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -r "$GITHUB_WORKSPACE"/docs/wiki/. .
+          rm -f .standard.toml
+          git add -A
+          if git diff --cached --quiet; then echo "wiki already current"; exit 0; fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "docs: publish from ${GITHUB_SHA::7}" -m "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA"
+          git push

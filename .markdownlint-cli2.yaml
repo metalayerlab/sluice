@@ -1,0 +1,11 @@
+# Template-owned. markdownlint for the wiki and the top-level docs.
+config:
+  default: true
+  MD013: false          # line length: prose wraps however the author likes
+  MD024:
+    siblings_only: true # the same heading under different parents is fine
+  MD033: false          # inline HTML: <div align=center>, <details>, comments
+  MD041: false          # first line need not be a heading (_Sidebar, _Footer)
+  MD060: false          # table column alignment: generated tables are compact
+ignores:
+  - CHANGELOG.md

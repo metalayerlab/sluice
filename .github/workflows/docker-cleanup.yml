@@ -1,0 +1,33 @@
+# Template-owned. Deletes branch images (dev-*, feat-*, and their -<sha>
+# variants) older than 7 days from GHCR. Scoped to those tag patterns, so it
+# never touches latest, edge, main or release tags.
+name: Docker image cleanup
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Preview deletions without executing
+        type: boolean
+        default: false
+
+permissions:
+  packages: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: snok/container-retention-policy@d3bdcf5ce9b05f685154e4a16c39233b245e3d53 # v3.1.0
+        with:
+          account: metalayerlab
+          # GITHUB_TOKEN can delete versions only if the package grants this repo's
+          # Actions the Admin role (package settings -> Manage Actions access).
+          # Otherwise set PACKAGES_DELETE_TOKEN (a token with delete:packages).
+          token: ${{ secrets.PACKAGES_DELETE_TOKEN || secrets.GITHUB_TOKEN }}
+          image-names: sluice
+          image-tags: "dev-* feat-*"
+          cut-off: 7d
+          dry-run: ${{ inputs.dry-run || false }}

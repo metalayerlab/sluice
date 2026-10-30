@@ -1,0 +1,41 @@
+# Template-owned. PRs are squash-merged, so the PR title becomes the commit on
+# main that release-please reads: it must be a Conventional Commit.
+#
+#   feat: add X        -> minor bump (patch before 1.0), "Features" in the changelog
+#   fix: stop Y        -> patch bump, "Bug Fixes"
+#   feat!: / BREAKING CHANGE: in the body -> major bump (minor before 1.0)
+#   docs: / refactor: / perf: / test: / build: / ci: / chore: / revert:
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  conventional-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            docs
+            test
+            build
+            ci
+            chore
+            revert
+          requireScope: false
+          # The subject is the changelog line: start lower-case, no trailing full stop.
+          subjectPattern: ^(?![A-Z]).+[^.]$
+          subjectPatternError: |
+            "{subject}" should start lower-case and not end with a full stop:
+            it becomes a line in CHANGELOG.md.

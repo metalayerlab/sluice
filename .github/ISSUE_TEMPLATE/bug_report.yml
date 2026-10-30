@@ -1,0 +1,40 @@
+name: Bug report
+description: Something sluice does wrong, or differently from the docs
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The smallest config and steps that show it. Remove anything private (tokens, hostnames, names).
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: Relevant lines, ideally at log_level DEBUG. Remove anything private.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`sluice version`, or the image tag."
+      placeholder: v1.2.3
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you run it
+      options:
+        - Docker / Compose
+        - Kubernetes
+        - systemd
+        - Package / from source
+        - Other
