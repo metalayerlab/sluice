@@ -69,7 +69,7 @@ Subclassing contract (§3 of the requirements): users never subclass `SluiceOper
 Routes are defined in Python, in a module the user names with `app.module` (like `uvicorn module:app`):
 
 ```python
-from sluice import Sluice, auth
+from sluice import Sluice, access_log, auth
 
 app = Sluice()
 app.use(access_log())                              # global, every call
@@ -90,10 +90,14 @@ app.route("/fuse/{project}/config.yaml", virtual=True, handler=ConfigTemplate())
 **Patterns.** Segments are literals, `{name}` (exactly one segment, naive string capture) or a final
 `{name*}` (zero or more segments, joined with `/`). A route matches its pattern **as a prefix**: the
 unconsumed tail of the virtual path is appended to the rendered backend. So `/root/{project}` with
-`backend="/data/{project}"` serves `/root/p/sub/file.txt` from `/data/p/sub/file.txt`.
+`backend="/data/{project}"` serves `/root/p/sub/file.txt` from `/data/p/sub/file.txt`. The tail is
+measured from the route that **owns** the backend: for an inherited backend, the child's own segments
+are part of it, so `private` under `/fuse/{user}/{token}` (backend `/ext4/{user}`) maps
+`.../private/notes.txt` to `/ext4/{user}/private/notes.txt`.
 
-**Backend templates** may reference `{param}` (from the route's chain), `{env.NAME}`; `{secret.*}` is
-rejected, because a rendered `real_path` is logged and shown by `sluice resolve`.
+**Backend templates** may reference `{param}` (from the route's chain) and `{env.NAME}`. `{secret.*}`
+and any param registered with `secret=True` are rejected, because a rendered `real_path` is logged and
+shown by `sluice resolve`.
 
 **Matching.** A tree walk from the root. Among siblings, the most specific match wins: a literal
 segment beats `{param}`, which beats `{param*}`, compared segment by segment. Two siblings with the
@@ -109,7 +113,9 @@ prefix-mounted middleware, so no `use(prefix, ...)` form is needed).
 **Synthetic directories.** The mount root and every literal prefix of a route (`/`, `/fuse`, and
 `/fuse/alice` once `alice` has been looked up) are read-only directories (`0555`). `readdir` lists
 literal children only: param segments can't be enumerated, so `ls /fuse` shows nothing beneath it, and
-a token in a path is never listed. A path no route covers is `ENOENT`.
+a token in a path is never listed. A path no route covers is `ENOENT`. `readdir` of a **backed**
+directory merges the real entries with the literal names of child routes (virtual or grouping), so
+`ls /fuse/alice/T0k` shows `status`; a child route's name hides a real entry of the same name.
 
 **Validation in `freeze()`**, before mounting (and by `sluice routes`), as `RouteError`:
 
@@ -132,17 +138,30 @@ class Middleware:
 
     async def pre(self, ctx: Context) -> None: ...  # inspect, mutate ctx.args, raise to deny
     async def post(self, ctx: Context, result: R) -> R: ...   # inspect or replace the result
+    async def failed(self, ctx: Context, error: FsError) -> None: ...  # observe a failure
 ```
 
 - `pre` hooks run in chain order; any may raise `Deny` / `FsError`, or call `ctx.respond(result)` to
   short-circuit with a result (the operation is skipped). Short-circuiting skips the remaining `pre`
   hooks and the operation; the `post` hooks of the middlewares whose `pre` already ran still run, in
-  reverse, so logging sees every outcome.
+  reverse.
+- When a call fails (a `pre` or `param()` denial, the operation's error, or a `post` that raised),
+  `failed` runs, in reverse, on every middleware whose `pre` ran, including the one that raised. It
+  can't change the outcome, and an exception in it is logged and ignored. So `access_log()` records
+  successes in `post` and denials and errors in `failed`: every outcome.
 - The operation runs once: the backend passthrough, or the route's `VirtualHandler`.
 - `post` hooks run in reverse chain order (onion order) and may return a replacement result. They
   can't prevent the operation: it has already happened.
 - A plain `async def fn(ctx)` passed where middleware is expected is a `pre`-only middleware.
-- The pipeline is the same for every op; per-op behaviour comes from `ops` and `ctx.op`.
+- The pipeline is the same for every op; per-op behaviour comes from `ops` and `ctx.op`. The
+  exceptions are the cleanup ops `forget`, `release` and `releasedir`: they bypass middleware and
+  always do their bookkeeping (close the backend fd, drop the handle, decrement lookup counts),
+  because the kernel can't act on their failure and gating them only leaks descriptors and inodes.
+- **Two-path ops** are authorised against both paths. `rename` runs the source route's chain; before
+  the operation, the `pre` hooks of the target route's chain that aren't already in it also run, with
+  a `Context` for the target path and the same `op`; either may deny. So renaming a file into or out
+  of `private` passes `admin_only`. `symlink` has one virtual path (the link); its target is an
+  uninterpreted string, and following it goes through `lookup`, which is gated.
 
 **Order of one call:** route resolution → `param()` callbacks (registration order, once per distinct
 param per call) → `pre` hooks → operation → `post` hooks.
@@ -163,7 +182,10 @@ snapshot. Virtual files are always opened with `direct_io`, so the kernel never 
 
 ### Context
 
-`Context` is a frozen dataclass except for `args` (replaceable in `pre`) and `state`:
+`Context` is a plain (mutable) dataclass. The routing fields (`op`, `path`, `inode`, `real_path`,
+`virtual`, `caller`, `config`, `route`) are read-only properties over a frozen `Resolution`; `args`
+may be replaced in `pre`; `params` starts as the raw merged captures, and each `param()` callback
+replaces its own key in turn; `state` is free for middleware.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -173,7 +195,7 @@ snapshot. Virtual files are always opened with `direct_io`, so the kernel never 
 | `real_path` | `Path \| None` | `None` for virtual routes and synthetic directories |
 | `virtual` | `bool` | |
 | `config` | `MountConfig` | `config.env: Mapping[str, str]`, `config.secret: Mapping[str, Secret]`; one shared instance |
-| `path`, `inode` | `PurePosixPath`, `int` | Virtual-side identity |
+| `path`, `inode` | `PurePosixPath`, `int` | Virtual-side identity; `display_path` masks secret segments |
 | `caller` | `Caller(uid, gid, pid)` | From the FUSE request; the only identity the kernel vouches for |
 | `timestamp` | `float` | `time.time()` at dispatch |
 | `correlation_id` | `str` | Mount-unique counter, hex; in every log line for the call |
@@ -277,8 +299,12 @@ At runtime the mount never dies because of a single call:
 - Any other exception in a `pre` hook, `param()` callback, operation or `post` hook → logged at ERROR
   with the correlation id and traceback, `EIO` to the caller.
 - **`post` hooks fail closed:** an exception there returns `EIO`, not the unmodified result. A failed
-  redaction must not leak the unredacted bytes. The operation's side effects (a write) stand.
-- Error messages and logs show params marked `secret=True` and all `Secret` values as `********`.
+  redaction must not leak the unredacted bytes. The operation's side effects (a write, a created
+  file) stand. If the operation opened something (`open`, `create`, `opendir`), the dispatcher closes
+  it and drops the handle before returning `EIO`, since the kernel never got a handle to `release`.
+- Error messages and logs show params marked `secret=True` and all `Secret` values as `********`,
+  and log virtual paths with those segments masked (`/fuse/alice/********/notes.txt`, via
+  `ctx.display_path`). `mount.debug` (libfuse's own tracing) is the one exception.
 
 ### Dependencies
 
