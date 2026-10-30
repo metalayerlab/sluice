@@ -23,7 +23,7 @@ from sluice import (
     access_log,
 )
 from sluice.backend import Passthrough
-from sluice.context import SetattrArgs
+from sluice.context import Caller, SetattrArgs
 from sluice.dispatch import Dispatcher
 from sluice.inodes import ROOT_INODE
 
@@ -342,6 +342,107 @@ def test_handle_survives_rename(dispatcher: Dispatcher, backing: Path) -> None:
         return data
 
     assert run(go()) == b"hello"
+
+
+def test_open_file_outlives_unlink(dispatcher: Dispatcher) -> None:
+    async def go() -> tuple[int, int, bytes, int]:
+        d = dispatcher
+        home = await walk(d, "/fuse/alice/T0k")
+        inode = (await d.lookup(home, "notes.txt")).inode
+        info = await d.open(inode, os.O_RDWR)
+        await d.unlink(home, "notes.txt")
+        size = (await d.getattr(inode)).attr.st_size
+        truncated = (await d.setattr(inode, SetattrArgs(size=5), fh=info.fh)).attr.st_size
+        data = await d.read(info.fh, 0, 100)
+        await d.release(info.fh)
+        return size, truncated, data, await errno_in(d.getattr(inode))
+
+    size, truncated, data, closed = run(go())
+    assert (size, truncated, data) == (len("hello SECRET world"), 5, b"hello")
+    assert closed == errno.ENOENT  # once closed, nothing names it
+
+
+def test_open_file_outlives_rename_over(dispatcher: Dispatcher, backing: Path) -> None:
+    (backing / "alice" / "new.txt").write_text("replacement", encoding="utf-8")
+
+    async def go() -> tuple[int, int]:
+        d = dispatcher
+        home = await walk(d, "/fuse/alice/T0k")
+        inode = (await d.lookup(home, "notes.txt")).inode
+        info = await d.open(inode, os.O_RDONLY)
+        await d.rename(home, "new.txt", home, "notes.txt")
+        old = (await d.getattr(inode)).attr.st_size
+        new = (await d.lookup(home, "notes.txt")).attr.st_size
+        await d.release(info.fh)
+        return old, new
+
+    assert run(go()) == (len("hello SECRET world"), len("replacement"))
+
+
+def test_open_virtual_file_outlives_unlink() -> None:
+    class Removable(VirtualHandler):
+        async def unlink(self, ctx: Context) -> None:
+            return None
+
+    app = Sluice()
+    app.route("/v", virtual=True, handler=Removable())
+    io = Passthrough(1)
+    d = Dispatcher(app.freeze(), io)
+
+    async def go() -> tuple[int, int]:
+        inode = (await d.lookup(ROOT_INODE, "v")).inode
+        info = await d.open(inode, os.O_RDONLY)
+        await d.unlink(ROOT_INODE, "v")
+        mode = (await d.getattr(inode)).attr.st_mode
+        denied = await errno_in(d.setattr(inode, SetattrArgs(size=0)))
+        await d.release(info.fh)
+        return mode, denied
+
+    try:
+        mode, denied = run(go())
+    finally:
+        io.shutdown()
+    assert stat.S_ISREG(mode)
+    assert denied == errno.EROFS
+
+
+def test_orphan_call_runs_as_the_requester(backing: Path) -> None:
+    seen: list[int] = []
+
+    class Spy(Middleware):
+        ops = frozenset({"getattr"})
+
+        async def pre(self, ctx: Context) -> None:
+            assert ctx.caller is not None
+            seen.append(ctx.caller.uid)
+
+    app = Sluice()
+    app.use(Spy())
+    app.route("/b", backend=str(backing / "alice"))
+    io = Passthrough(1)
+    d = Dispatcher(app.freeze(), io)
+    opener, requester = Caller(1000, 1000, 1), Caller(2000, 2000, 2)
+
+    async def go() -> None:
+        home = (await d.lookup(ROOT_INODE, "b")).inode
+        inode = (await d.lookup(home, "notes.txt")).inode
+        info = await d.open(inode, os.O_RDONLY, opener)
+        await d.unlink(home, "notes.txt")
+        seen.clear()
+        await d.getattr(inode, requester)
+        await d.release(info.fh)
+
+    try:
+        run(go())
+    finally:
+        io.shutdown()
+    assert seen == [2000]
+
+
+async def errno_in(coro: Awaitable[Any]) -> int:
+    with pytest.raises(FsError) as e:
+        await coro
+    return e.value.errno
 
 
 def test_bad_handle_is_ebadf(dispatcher: Dispatcher) -> None:

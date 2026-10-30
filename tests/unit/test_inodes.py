@@ -39,9 +39,14 @@ def test_rename_moves_descendants_and_detaches_target() -> None:
     t.rename(P("/d"), P("/e"))
     assert t.path(d) == P("/e")
     assert t.path(f) == P("/e/f")
+    assert t.detached(old_target)  # lives on, for its open files, until forgotten
     with pytest.raises(FsError):
-        t.path(old_target)
-    t.forget(old_target, 1)  # a detached inode can still be forgotten
+        t.path(old_target)  # but its old path names the moved file now
+    before = len(t)
+    t.forget(old_target, 1)
+    assert len(t) == before - 1
+    assert not t.detached(old_target)
+    assert t.path(d) == P("/e")
     assert t.find(P("/d")) == 0
 
 
@@ -57,10 +62,23 @@ def test_forget_after_unlink_and_reuse_of_name() -> None:
     t = InodeTable()
     a = t.lookup(P("/a"))
     t.unlink(P("/a"))
+    assert t.detached(a)
     b = t.lookup(P("/a"))
     assert a != b
+    assert not t.detached(b)
     t.forget(a, 1)
     assert t.path(b) == P("/a")
+    assert len(t) == 2
+
+
+def test_detaching_an_unheld_inode_drops_it() -> None:
+    t = InodeTable()
+    listed = t.ensure(P("/d/f"))  # from readdir: no lookup, so no forget will come
+    held = t.lookup(P("/d"))
+    t.unlink(P("/d"))
+    assert t.detached(held)
+    assert not t.detached(listed)
+    assert len(t) == 2  # the root and the held inode
 
 
 def test_passthrough_needs_a_real_path() -> None:

@@ -176,3 +176,19 @@ def test_rename_across_backends_is_exdev(mounted: Path) -> None:
     with pytest.raises(OSError) as e:
         os.rename(alice / "notes.txt", bob / "notes.txt")
     assert e.value.errno == errno.EXDEV
+
+
+def test_open_file_outlives_unlink_and_replace(mounted: Path) -> None:
+    home = mounted / "fuse" / "alice" / "T0k"
+    (home / "tmp.txt").write_text("scratch", encoding="utf-8")
+    with (home / "tmp.txt").open("r+b") as f:
+        os.unlink(home / "tmp.txt")
+        assert os.fstat(f.fileno()).st_size == 7
+        os.ftruncate(f.fileno(), 3)
+        assert os.fstat(f.fileno()).st_size == 3
+    # The atomic-replace pattern: a reader of the old file keeps seeing the old file.
+    (home / "new.txt").write_text("replacement", encoding="utf-8")
+    with (home / "notes.txt").open("rb") as f:
+        os.rename(home / "new.txt", home / "notes.txt")
+        assert os.fstat(f.fileno()).st_size == len("hello SECRET world\n")
+    assert (home / "notes.txt").read_text(encoding="utf-8") == "replacement"
