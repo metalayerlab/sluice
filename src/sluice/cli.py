@@ -55,8 +55,19 @@ def version() -> None:
 def show_config(config: ConfigOption = None) -> None:
     """Print the effective configuration and where each value came from. Secrets are masked."""
     cfg = _load(config)
-    values = {
+    values: dict[str, object] = {
         "log_level": cfg.log_level,
+        "app.module": cfg.app_module,
+        "app.dir": cfg.app_dir,
+        "mount.point": cfg.mount_point,
+        "mount.fsname": cfg.mount_fsname,
+        "mount.allow_other": cfg.mount_allow_other,
+        "mount.cache_ms": cfg.mount_cache_ms,
+        "mount.debug": cfg.mount_debug,
+        "io.threads": cfg.io_threads,
+        "env.expose": ",".join(cfg.env_expose),
+        "secrets.dir": cfg.secrets_dir,
+        "pipeline.slow_ms": cfg.pipeline_slow_ms,
     }
     for setting in SETTINGS:
         shown = "********" if setting.secret else values.get(setting.key)

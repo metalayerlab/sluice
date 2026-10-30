@@ -47,3 +47,14 @@ def test_main_runs_app(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "app", lambda: called.append(True))
     cli.main()
     assert called == [True]
+
+
+def test_config_shows_every_setting(write_config: Callable[..., Path]) -> None:
+    from sluice.config import SETTINGS
+
+    result = runner.invoke(app, ["config", "-c", str(write_config("io:\n  threads: 3\n"))])
+    assert result.exit_code == 0
+    for setting in SETTINGS:
+        assert f"{setting.key} = " in result.stdout
+    assert "io.threads = 3  (file)" in result.stdout
+    assert "None" not in result.stdout

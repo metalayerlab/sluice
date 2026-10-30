@@ -79,3 +79,57 @@ def test_bool_coercion_rejects_garbage() -> None:
 
     with pytest.raises(ConfigError, match="expected bool"):
         _coerce(Setting("flag", False, "a flag"), "maybe")
+
+
+def test_new_settings_defaults(tmp_path: Path) -> None:
+    cfg = load_config(tmp_path / "missing.yaml", environ={})
+    assert cfg.app_module == ""
+    assert cfg.mount_fsname == "sluice"
+    assert cfg.mount_allow_other is False
+    assert cfg.mount_cache_ms == 0
+    assert cfg.io_threads == 8
+    assert cfg.env_expose == ()
+    assert cfg.secrets_dir == Path("/run/secrets")
+    assert cfg.pipeline_slow_ms == 0
+
+
+def test_nested_keys_from_file_and_env(write_config: Callable[..., Path]) -> None:
+    path = write_config("app:\n  module: routes:app\nmount:\n  point: /mnt/x\n  cache_ms: 50\n")
+    cfg = load_config(path, environ={"SLUICE_MOUNT_ALLOW_OTHER": "yes", "SLUICE_IO_THREADS": "2"})
+    assert cfg.app_module == "routes:app"
+    assert cfg.mount_point == "/mnt/x"
+    assert cfg.mount_cache_ms == 50
+    assert cfg.mount_allow_other is True
+    assert cfg.io_threads == 2
+    assert cfg.sources["mount.cache_ms"] == "file"
+    assert cfg.sources["io.threads"] == "SLUICE_IO_THREADS"
+
+
+def test_env_expose_is_split_and_trimmed(tmp_path: Path) -> None:
+    cfg = load_config(tmp_path / "m.yaml", environ={"SLUICE_ENV_EXPOSE": " HOME, REGION ,,"})
+    assert cfg.env_expose == ("HOME", "REGION")
+
+
+@pytest.mark.parametrize("name", ["SLUICE_CONFIG", "SLUICE_LOG_LEVEL_FILE"])
+def test_env_expose_refuses_sluice_names(tmp_path: Path, name: str) -> None:
+    with pytest.raises(ConfigError, match="sluice setting"):
+        load_config(tmp_path / "m.yaml", environ={"SLUICE_ENV_EXPOSE": f"HOME,{name}"})
+
+
+def test_env_expose_refuses_bad_names(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="not an environment variable name"):
+        load_config(tmp_path / "m.yaml", environ={"SLUICE_ENV_EXPOSE": "A-B"})
+
+
+@pytest.mark.parametrize(
+    ("var", "value", "match"),
+    [
+        ("SLUICE_MOUNT_CACHE_MS", "-1", "mount.cache_ms"),
+        ("SLUICE_PIPELINE_SLOW_MS", "-5", "pipeline.slow_ms"),
+        ("SLUICE_IO_THREADS", "0", "io.threads"),
+        ("SLUICE_IO_THREADS", "many", "expected int"),
+    ],
+)
+def test_numeric_limits(tmp_path: Path, var: str, value: str, match: str) -> None:
+    with pytest.raises(ConfigError, match=match):
+        load_config(tmp_path / "m.yaml", environ={var: value})
