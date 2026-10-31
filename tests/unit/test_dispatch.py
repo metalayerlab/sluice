@@ -597,3 +597,108 @@ def test_access_log_masks_tokens(dispatcher: Dispatcher, caplog: pytest.LogCaptu
         run(cat(dispatcher, "/fuse/alice/T0k/notes.txt"))
     assert "/fuse/alice/********/notes.txt" in caplog.text
     assert "T0k" not in caplog.text
+
+
+@pytest.fixture
+def swapped(dispatcher: Dispatcher, backing: Path, tmp_path: Path) -> tuple[int, int, Path]:
+    """`alice/d` swapped for a link to a directory outside the backend, after its lookups.
+
+    What a second client racing the kernel's lookups, or a writer in the backend, could do.
+    """
+    (backing / "alice" / "d").mkdir()
+    (backing / "alice" / "d" / "secret").write_text("inside", encoding="utf-8")
+    d = run(walk(dispatcher, "/fuse/alice/T0k/d"))
+    secret = run(walk(dispatcher, "/fuse/alice/T0k/d/secret"))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret").write_text("outside", encoding="utf-8")
+    (backing / "alice" / "d" / "secret").unlink()
+    (backing / "alice" / "d").rmdir()
+    (backing / "alice" / "d").symlink_to(outside)
+    return d, secret, outside
+
+
+_ESCAPED = {errno.ELOOP, errno.ENOTDIR}
+
+
+def test_reads_nothing_through_a_symlink_swapped_in_for_a_directory(
+    dispatcher: Dispatcher, swapped: tuple[int, int, Path]
+) -> None:
+    with pytest.raises(FsError) as e:
+        leaked = run(cat(dispatcher, "/fuse/alice/T0k/d/secret"))
+        pytest.fail(f"read {leaked!r} from outside the backend")
+    assert e.value.errno in _ESCAPED
+
+
+def test_never_follows_a_symlink_swapped_in_for_a_directory(
+    dispatcher: Dispatcher, swapped: tuple[int, int, Path]
+) -> None:
+    d, secret, outside = swapped
+    io = dispatcher
+    calls: list[Callable[[], Awaitable[Any]]] = [
+        lambda: io.open(secret, os.O_RDONLY),
+        lambda: io.getattr(secret),
+        lambda: io.setattr(secret, SetattrArgs(mode=0o777, size=0, mtime_ns=1)),
+        lambda: io.readlink(secret),
+        lambda: io.access(secret, os.R_OK),
+        lambda: io.getxattr(secret, "user.tag"),
+        lambda: io.setxattr(secret, "user.tag", b"v"),
+        lambda: io.listxattr(secret),
+        lambda: io.removexattr(secret, "user.tag"),
+        lambda: io.opendir(d),
+        lambda: io.create(d, "new", os.O_WRONLY, 0o644),
+        lambda: io.mkdir(d, "newdir", 0o755),
+        lambda: io.symlink(d, "newlink", "x"),
+        lambda: io.unlink(d, "secret"),
+        lambda: io.rmdir(d, "sub"),
+        lambda: io.rename(d, "secret", d, "moved"),
+    ]
+    (outside / "sub").mkdir()
+    for call in calls:
+        assert errno_of(call) in _ESCAPED
+    assert sorted(p.name for p in outside.iterdir()) == ["secret", "sub"]
+    assert (outside / "secret").read_text(encoding="utf-8") == "outside"
+    assert stat.S_IMODE((outside / "secret").stat().st_mode) != 0o777
+
+
+def test_readdir_never_follows_a_symlink_swapped_in(
+    dispatcher: Dispatcher, backing: Path, tmp_path: Path
+) -> None:
+    (backing / "alice" / "d").mkdir()
+    fh = run(dispatcher.opendir(run(walk(dispatcher, "/fuse/alice/T0k/d"))))
+    (tmp_path / "outside").mkdir()
+    (tmp_path / "outside" / "secret").write_text("outside", encoding="utf-8")
+    (backing / "alice" / "d").rmdir()
+    (backing / "alice" / "d").symlink_to(tmp_path / "outside")
+    assert errno_of(lambda: dispatcher.readdir(fh)) in _ESCAPED
+
+
+def test_opens_no_symlink_swapped_in_for_a_file(
+    dispatcher: Dispatcher, backing: Path, tmp_path: Path
+) -> None:
+    notes = run(walk(dispatcher, "/fuse/alice/T0k/notes.txt"))
+    (tmp_path / "outside.txt").write_text("outside", encoding="utf-8")
+    (backing / "alice" / "notes.txt").unlink()
+    (backing / "alice" / "notes.txt").symlink_to(tmp_path / "outside.txt")
+    assert errno_of(lambda: dispatcher.open(notes, os.O_RDONLY)) == errno.ELOOP
+    assert errno_of(lambda: dispatcher.setattr(notes, SetattrArgs(size=0))) == errno.EINVAL
+    home = run(walk(dispatcher, "/fuse/alice/T0k"))
+    assert errno_of(lambda: dispatcher.setattr(home, SetattrArgs(size=0))) == errno.EISDIR
+    assert (tmp_path / "outside.txt").read_text(encoding="utf-8") == "outside"
+    # The final component is still the link itself for lstat and readlink.
+    assert stat.S_ISLNK(run(dispatcher.getattr(notes)).attr.st_mode)
+    assert run(dispatcher.readlink(notes)) == str(tmp_path / "outside.txt")
+
+
+def test_follows_a_symlinked_backend_prefix(tmp_path: Path) -> None:
+    (tmp_path / "real" / "alice").mkdir(parents=True)
+    (tmp_path / "real" / "alice" / "f").write_text("f", encoding="utf-8")
+    (tmp_path / "data").symlink_to(tmp_path / "real")
+    app = Sluice()
+    app.route("/u/{user}", backend=f"{tmp_path}/data/{{user}}")
+    io = Passthrough(1)
+    d = Dispatcher(app.freeze(), io)
+    try:
+        assert run(cat(d, "/u/alice/f")) == b"f"
+    finally:
+        io.shutdown()

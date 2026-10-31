@@ -33,7 +33,7 @@ flowchart LR
 | `sluice/middleware.py` | `Middleware`, `run_pipeline` (params → pre → operation → post, with `failed`), `OPS`, and the built-ins `auth()` and `access_log()` |
 | `sluice/virtual.py` | `VirtualHandler` (the per-op interface and its read-only file defaults) and `SyntheticDir` (route-made directories) |
 | `sluice/inodes.py` | `InodeTable` (inode ↔ virtual path, lookup counts, rename and unlink bookkeeping) and `HandleTable` (open files and directories) |
-| `sluice/backend.py` | `Passthrough`: the same per-op interface as `VirtualHandler`, as syscalls on `ctx.real_path` in a bounded `ThreadPoolExecutor` |
+| `sluice/backend.py` | `Passthrough`: the same per-op interface as `VirtualHandler`, as syscalls on `ctx.real_path` in a bounded `ThreadPoolExecutor`. Each path op walks from the template's literal prefix (`Resolution.backend_prefix`) with `O_NOFOLLOW` and acts on the last name with `dir_fd=` |
 | `sluice/dispatch.py` | `Dispatcher`: one async method per FUSE op; routing, contexts, pipelines, errno mapping, readdir merging, cleanup of failed opens |
 | `sluice/fs.py` | `SluiceOperations`: pyfuse3 ↔ dispatcher conversion only. Duck-types `pyfuse3.Operations` so it type-checks without pyfuse3 |
 | `sluice/mount.py` | Mount lifecycle: `prepare` (import, `MountConfig`, freeze), mount-point checks, FUSE options, the asyncio loop, signal handling, unmount |

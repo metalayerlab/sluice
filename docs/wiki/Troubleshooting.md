@@ -72,6 +72,14 @@ In releases after sluice 0.1.1, a rename runs every middleware's `pre` hooks aga
 
 A `pre` hook or `param()` callback denied the call (`auth()` with a `verify` that returned False, or a `Deny`). The access log shows the op and path that got `EACCES`. `sluice resolve <path> --op <op>` lists the middleware that runs there.
 
+### `Too many levels of symbolic links` or `Not a directory` below a symlink
+
+sluice never follows a symlink below a backend template's literal prefix itself: that would let a link swapped into the backing store lead it outside the backend ([Security](Security#hardening)). Links still work through the mount, because the kernel follows them: a relative link to something in the same backend resolves back through sluice. The error means a directory sluice had already looked up was replaced by a link before the call reached it, by another writer in the backing store. To use a symlinked directory as a backend, put it in the literal prefix (`backend="/srv/data/{user}"` with `/srv/data` a link), or point the template at its target.
+
+### xattr calls fail with `No such file or directory`, or `chmod` with `Operation not supported`
+
+sluice reaches a file's xattrs through `/proc/self/fd`, and its `chmod` without following a symlink needs Linux 6.6 or glibc 2.32 with `/proc`. Mount `/proc` in sluice's container or chroot.
+
 ### A file shows up in `ls` but `cat` says `No such file or directory`
 
 Below a route-made directory (one that exists only because a route passes through it), `ls` shows the literal names of child routes. If the backend directory a route inherits doesn't exist (`/ext4/alice` for user `alice`), nothing beneath it can be reached. Create the backing directory, or check `real path` in `sluice resolve`.

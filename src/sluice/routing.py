@@ -230,6 +230,8 @@ class Resolution:
     display_path: str
     real_path: Path | None = None
     backend_root: Path | None = None  # The rendered backend, before the tail
+    # The template's literal prefix: the only part of real_path the daemon follows symlinks in.
+    backend_prefix: Path | None = None
     owner: Route | None = None  # The route whose backend this is
     handler: VirtualHandler | None = None
     direct_io: bool = False
@@ -355,7 +357,12 @@ class RouteTable:
             if not real.is_relative_to(template.prefix):
                 raise FsError(errno.EACCES, "path escapes its backend")
             return replace(
-                base, kind="backed", real_path=Path(real), backend_root=Path(root), owner=route
+                base,
+                kind="backed",
+                real_path=Path(real),
+                backend_root=Path(root),
+                backend_prefix=Path(template.prefix),
+                owner=route,
             )
         if not tail or partial:
             return base
