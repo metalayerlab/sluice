@@ -1,6 +1,6 @@
 # Written by Copier: never edit by hand. `copier update` reads it to know
 # which template version and answers this project was made from.
-_commit: v0.1.14
+_commit: v0.1.15
 _src_path: gh:metalayerlab/project-template
 code_owners: '@metalayerlab/maintainers'
 container_image: true
@@ -9,6 +9,8 @@ description: Sluice — a Python FUSE filesystem with an Express-style router th
     rewrites, and middleware-intercepts every filesystem call between virtual paths
     and their backing stores.
 github_owner: metalayerlab
+image_extras:
+- fuse
 kind: cli
 language: python
 license: Unlicense
