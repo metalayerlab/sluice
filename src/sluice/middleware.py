@@ -158,10 +158,13 @@ async def run_pipeline(
     """
     chain = [mw for mw in ctx.resolution.middlewares if mw.applies(ctx.op)]
     ran: list[tuple[Middleware, Context]] = []
+    # Who `failed` reaches. A param() failure comes before its chain's pre hooks; let the whole
+    # chain observe it, as well as the hooks that already ran.
+    observers: Sequence[tuple[Middleware, Context]] = [(mw, ctx) for mw in chain]
     stage = "param()"
     try:
         await run_params(ctx, ctx.resolution.param_specs)
-        stage = "pre"
+        stage, observers = "pre", ran
         for mw in chain:
             ran.append((mw, ctx))
             await mw.pre(ctx)
@@ -171,14 +174,16 @@ async def run_pipeline(
         for other in also:
             if responder is not None:
                 break
+            other_chain = [mw for mw in other.resolution.middlewares if mw.applies(other.op)]
+            stage, observers = "param()", [*ran, *((mw, other) for mw in other_chain)]
             await run_params(other, other.resolution.param_specs)
-            for mw in other.resolution.middlewares:
-                if mw.applies(other.op):
-                    ran.append((mw, other))
-                    await mw.pre(other)
-                    if other.responded:
-                        responder = other
-                        break
+            stage, observers = "pre", ran
+            for mw in other_chain:
+                ran.append((mw, other))
+                await mw.pre(other)
+                if other.responded:
+                    responder = other
+                    break
         if responder is None:
             stage = "operation"
             result = await operation(ctx)
@@ -189,8 +194,7 @@ async def run_pipeline(
             result = await mw.post(mw_ctx, result)
     except Exception as e:
         error = _as_fs_error(ctx, e, stage)
-        # A param() failure comes before any pre hook; let the whole chain observe it.
-        await _failed([(mw, ctx) for mw in chain] if stage == "param()" else ran, error)
+        await _failed(observers, error)
         raise error from e
     return result
 

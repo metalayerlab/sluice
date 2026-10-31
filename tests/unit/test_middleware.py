@@ -241,6 +241,26 @@ def test_also_target_middleware_observes_a_failed_operation() -> None:
     ]
 
 
+def test_also_target_param_denial_lets_the_target_chain_observe_it() -> None:
+    log: list[str] = []
+
+    async def reject(ctx: Context, raw: Any) -> Any:
+        raise FsError(errno.ENOENT, "no such user")
+
+    app = Sluice()
+    app.route("/a", backend="/a", middlewares=[PathRecorder("src", log)])
+    app.route("/b/{user}", backend="/b", middlewares=[PathRecorder("dst", log)])
+    app.param("user", reject)
+    src, dst = rename_contexts(app.freeze(), "/a/f", "/b/x/f")
+    with pytest.raises(FsError):
+        run(src, also=[dst])
+    assert log == [
+        "pre:src:/a/f",
+        "failed:dst:/b/x/f:ENOENT",
+        "failed:src:/a/f:ENOENT",
+    ]
+
+
 def test_also_target_respond_short_circuits_the_operation() -> None:
     log: list[str] = []
 
