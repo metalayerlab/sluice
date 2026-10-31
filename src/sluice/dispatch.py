@@ -381,8 +381,8 @@ class Dispatcher:
             return Attr.file(0o444, mtime_ns=self._synthetic.mtime_ns)
         if res is not None and res.real_path is not None:
             try:
-                return await self.io.lstat(res.real_path)
-            except OSError:
+                return await self.io.lstat(res)
+            except (OSError, FsError):
                 pass
         return Attr.directory(0o555, mtime_ns=self._synthetic.mtime_ns)
 

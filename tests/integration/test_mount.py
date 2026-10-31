@@ -192,3 +192,15 @@ def test_open_file_outlives_unlink_and_replace(mounted: Path) -> None:
         os.rename(home / "new.txt", home / "notes.txt")
         assert os.fstat(f.fileno()).st_size == len("hello SECRET world\n")
     assert (home / "notes.txt").read_text(encoding="utf-8") == "replacement"
+
+
+def test_symlinks_inside_the_backend_work(mounted: Path) -> None:
+    # The kernel follows a link itself, back through the mount: sluice never has to.
+    home = mounted / "fuse" / "alice" / "T0k"
+    (home / "sub").mkdir()
+    (home / "sub" / "f").write_text("f", encoding="utf-8")
+    (home / "to-sub").symlink_to("sub")
+    (home / "to-notes").symlink_to("notes.txt")
+    assert (home / "to-sub" / "f").read_text(encoding="utf-8") == "f"
+    assert (home / "to-notes").read_text(encoding="utf-8") == "hello SECRET world\n"
+    assert os.readlink(home / "to-sub") == "sub"
