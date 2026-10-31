@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/metalayerlab/sluice/compare/v0.1.0...v0.1.1) (2026-10-31)
+
+
+### 🐛 Bug Fixes
+
+* bring the open-file fixes from [#7](https://github.com/metalayerlab/sluice/issues/7) and [#8](https://github.com/metalayerlab/sluice/issues/8) to main ([5598b9d](https://github.com/metalayerlab/sluice/commit/5598b9d592f7fd596b36f11a8b82dc2f9ab4c14d))
+
 ## 0.1.0 (2026-10-31)
 
 
