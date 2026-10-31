@@ -68,6 +68,10 @@ sluice 0.1.1 and earlier: on a backed route, a `post` hook (or a `pre` hook via 
 
 In releases after sluice 0.1.1, a rename runs every middleware's `pre` hooks against the target path as well as the source, including middleware both paths share (an `app.use(auth(...))`, or any middleware when both paths are on one route). In 0.1.1 and earlier a shared middleware saw only the source, so `auth()` let a file be moved into a path its `verify` refuses. A `Permission denied` from `mv` (or `rename(2)`) now means `verify` or a `pre` hook refused the target: the access log shows `rename` with the target path and `EACCES`. Allow the move in `verify` if it should succeed. `access_log()` now logs a rename once for each path.
 
+### A rename goes ahead although a target-side hook called `ctx.respond()`
+
+sluice 0.1.1 and earlier: during a `rename`, a `ctx.respond()` from a `pre` hook on the target's chain is ignored. The rename runs, the target's later `pre` hooks still run, and the call returns the operation's result. Upgrade. Until then, raise `Deny` (or another `FsError`) in that hook instead: a denial on the target side does stop the rename.
+
 ### `Permission denied` on everything below a path
 
 A `pre` hook or `param()` callback denied the call (`auth()` with a `verify` that returned False, or a `Deny`). The access log shows the op and path that got `EACCES`. `sluice resolve <path> --op <op>` lists the middleware that runs there.
