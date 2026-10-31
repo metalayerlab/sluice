@@ -1,6 +1,6 @@
 # GitHub's About box. Project-owned: edit it, then apply it with
 #   python3 scripts/repo-metadata.py
 # CI warns on each push to main while GitHub differs from this file.
-description = "Sluice \u2014 a Python FUSE filesystem with an Express-style router that gates, rewrites, and middleware-intercepts every filesystem call between virtual paths and their backing stores."
+description = "A Python FUSE filesystem with an Express-style router that gates, rewrites, and middleware-intercepts every filesystem call between virtual paths and their backing stores."
 homepage = "https://github.com/metalayerlab/sluice/wiki"
 topics = ["python", "cli"]
