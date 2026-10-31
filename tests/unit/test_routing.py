@@ -230,6 +230,35 @@ def test_secret_param_in_backend_is_refused() -> None:
         app.freeze()
 
 
+def test_secret_param_below_an_inherited_backend_is_refused() -> None:
+    # The segments below the backend's route are appended to the real path, which is logged.
+    app = Sluice()
+    files = app.route("/files", backend="/srv/files")
+    files.route("/{token}")
+    app.param("token", secret=True)
+    with pytest.raises(RouteError, match=r"/files/\{token\}: backend can't use the secret param"):
+        app.freeze()
+
+
+def test_secret_param_below_a_virtual_route_is_allowed() -> None:
+    # Below a virtual route nothing is backed, so no real path holds the value.
+    app = Sluice()
+    files = app.route("/files", backend="/srv/files")
+    status = files.route("status", virtual=True, handler=Status())
+    status.route("{token}")
+    app.param("token", secret=True)
+    app.freeze()
+
+
+def test_secret_param_beside_its_backend_is_allowed() -> None:
+    # The owning route's own segments are not appended to the real path.
+    app = Sluice()
+    app.route("/x/{token}", backend="/b")
+    app.param("token", secret=True)
+    res = app.freeze().resolve("/x/abc/f")
+    assert res is not None and str(res.real_path) == "/b/f"
+
+
 def test_walk_reports_backend_states() -> None:
     walked = tenant_app().freeze().walk()
     states = [(w.depth, w.node.route.full_pattern, w.state) for w in walked]

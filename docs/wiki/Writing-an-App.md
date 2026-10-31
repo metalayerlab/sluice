@@ -45,7 +45,7 @@ A param must be a whole segment (`file-{id}` is an error).
 
 A route with no backend of its own, none to inherit and not virtual is a **grouping** node. Its path is a read-only directory, and its middleware applies to everything beneath it. That is how you attach middleware to a prefix.
 
-**Backend templates** can use the route chain's params (`{user}`) and allowlisted environment variables (`{env.REGION}`, see `env.expose` in [In-Depth Configuration](In-Depth-Configuration)). They can't use `{secret.*}` or a param registered with `secret=True`, because the rendered real path is logged and shown by `sluice resolve`. A rendered path that would leave the template's literal prefix (through `..` in a captured value) is refused with `EACCES`.
+**Backend templates** can use the route chain's params (`{user}`) and allowlisted environment variables (`{env.REGION}`, see `env.expose` in [In-Depth Configuration](In-Depth-Configuration)). They can't use `{secret.*}` or a param registered with `secret=True`, because the rendered real path is logged and shown by `sluice resolve`. For the same reason, a route that inherits a backend can't capture a secret param, since its segments become part of the real path; capture it on the backed route itself (`/fuse/{user}/{token}` with `backend="/ext4/{user}"`) or above it. A rendered path that would leave the template's literal prefix (through `..` in a captured value) is refused with `EACCES`.
 
 ### Directories that routes create
 
@@ -57,6 +57,7 @@ The routes are validated before mounting (and by `sluice routes`). Each problem 
 
 - every `{param}` in a backend template is captured by the route or an ancestor;
 - every `{env.NAME}` is in `env.expose`;
+- no backend template uses a secret param, and no route that inherits a backend captures one;
 - a param name is captured at most once along a chain;
 - `virtual=True` has a `handler` (a `VirtualHandler`) and no `backend`, and a handler needs `virtual=True`;
 - every middleware hook and `param()` callback is `async def`, and every name in a middleware's `ops` is a real operation;
@@ -66,7 +67,7 @@ The routes are validated before mounting (and by `sluice routes`). Each problem 
 
 `app.param(name, func=None, secret=False)`. `async func(ctx, raw)` runs once per call, for every call whose route chain captures `name`, after routing and before any middleware. Its return value replaces `ctx.params[name]` (for example a decoded token instead of the raw string). Raising `Deny` or `FsError` fails the call. Callbacks run in registration order.
 
-`secret=True` masks the param: `ctx.display_path`, the access log and `sluice resolve` show `********` for its segment, and backend templates can't use it. `func` can be left out to mark a param secret without transforming it.
+`secret=True` masks the param: `ctx.display_path`, the access log and `sluice resolve` show `********` for its segment, and backend templates (and routes that inherit a backend) can't use it. `func` can be left out to mark a param secret without transforming it.
 
 ## Middleware
 
