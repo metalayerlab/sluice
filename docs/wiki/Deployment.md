@@ -37,8 +37,6 @@ WantedBy=multi-user.target
 
 ## Container
 
-<!-- TODO(wiki): the container recipe below hasn't been run end to end (image build and a mount inside Docker); verify it, then remove this marker. -->
-
 The image (`ghcr.io/metalayerlab/sluice`) runs `sluice` as uid 1000 and contains `fusermount3`. A FUSE mount inside a container needs more than most containers get:
 
 ```sh
