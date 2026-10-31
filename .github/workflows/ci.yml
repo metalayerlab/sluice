@@ -46,6 +46,15 @@ jobs:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
 
+      # The `build:` packages in contrib/system-packages.txt (project-owned), for
+      # dependencies that build from source. None listed: nothing is installed.
+      - name: System packages
+        run: |
+          if grep -q '^build:.*[^[:space:]]' contrib/system-packages.txt; then
+            sudo apt-get update
+            sed -n 's/^build://p' contrib/system-packages.txt | xargs sudo apt-get install -y --no-install-recommends
+          fi
+
       - name: Install (from the lock file)
         run: uv sync --locked
 

@@ -72,7 +72,7 @@ Why things are the way they are is recorded in [docs/design/](https://github.com
 All of these come from [design 0001](https://github.com/metalayerlab/sluice/blob/main/docs/design/0001-initial-design.md):
 
 - **pyfuse3, on asyncio** through its `pyfuse3.asyncio` adapter (pyfuse3 is Trio-native). Middleware authors get asyncio, and asyncio's slow-callback detection backs `pipeline.slow_ms`.
-- **pyfuse3 is an optional extra** (`sluice[fuse]`), imported only by `fs.py` and `mount.py`: it compiles against libfuse3, which the template's CI doesn't have (project-template#53).
+- **pyfuse3 is an optional extra** (`sluice[fuse]`), imported only by `fs.py` and `mount.py`: it compiles against libfuse3, so the core, its unit tests and lint install without a C toolchain.
 - **The backend is a route property**, resolved before middleware runs, never rewritten by middleware: the real path doesn't depend on middleware order.
 - **Phase-structured middleware** (`pre` / `post` / `failed` with an `ops` filter), not `next()` wrapping: pre and post are structurally distinct, composition order is defined, and a hook can't swallow the operation by forgetting to call `next()`.
 - **Specificity among siblings**, and same-shape siblings are an error: the outcome never depends on import order.

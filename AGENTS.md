@@ -52,6 +52,7 @@ T = template-owned: never edit here; fixes arrive by the weekly update PR. Bug i
 | `docs/wiki/` | The wiki (published from `main`); `.standard.toml` = required pages (T) |
 | `docs/design/` | Design records; `README.md` is the index |
 | `docs/ai/` | Prompts, review checklist (T) |
+| `contrib/system-packages.txt` | apt packages: `build:` (CI, image builder), `runtime:` (image) |
 | `Dockerfile` | Image (T skeleton) |
 | `.github/workflows/`, `scripts/` | CI and its scripts (T) |
 | `CHANGELOG.md`, version in `pyproject.toml`, `.release-please-manifest.json` | release-please only |

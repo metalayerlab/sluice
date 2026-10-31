@@ -2,9 +2,22 @@
 # stages (extra binaries, assets) go between the builder and the runtime stage.
 
 # ============================================================
-# Stage 1: builder (dependencies, then the package, into /opt/venv)
+# Stage 1: builder
 # ============================================================
 FROM python:3.13-slim AS builder
+
+# The `build:` packages in contrib/system-packages.txt (project-owned): compilers
+# and headers for dependencies that build from source. None listed: nothing runs
+# hadolint ignore=DL3008,SC2046
+RUN --mount=type=bind,source=contrib/system-packages.txt,target=/tmp/system-packages.txt \
+    set -- $(sed -n 's/^build://p' /tmp/system-packages.txt); \
+    if [ $# -gt 0 ]; then \
+        apt-get update \
+        && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@" \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+# Dependencies, then the package, into /opt/venv
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /bin/uv
 
@@ -16,13 +29,6 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_PYTHON_DOWNLOADS=never
 
 WORKDIR /build
-
-# Workaround for metalayerlab/project-template#53 (no system-packages hook yet): pyfuse3 ships
-# only an sdist and compiles against libfuse3. Remove when the hook lands.
-# hadolint ignore=DL3008
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc libc6-dev libfuse3-dev pkg-config \
-    && rm -rf /var/lib/apt/lists/*
 
 # Dependencies first, so a source change doesn't reinstall them
 COPY pyproject.toml uv.lock README.md ./
@@ -49,11 +55,16 @@ LABEL org.opencontainers.image.title="sluice" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.created="${CREATED}"
 
-# Workaround for metalayerlab/project-template#53: fusermount3 and (as its dependency) libfuse3.
-# hadolint ignore=DL3008
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends fuse3 \
-    && rm -rf /var/lib/apt/lists/*
+# The `runtime:` packages in contrib/system-packages.txt: libraries and tools the
+# project needs at run time. None listed: nothing runs
+# hadolint ignore=DL3008,SC2046
+RUN --mount=type=bind,source=contrib/system-packages.txt,target=/tmp/system-packages.txt \
+    set -- $(sed -n 's/^runtime://p' /tmp/system-packages.txt); \
+    if [ $# -gt 0 ]; then \
+        apt-get update \
+        && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@" \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" \
