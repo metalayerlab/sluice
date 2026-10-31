@@ -31,6 +31,7 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
 WORKDIR /build
 
 # Dependencies first, so a source change doesn't reinstall them
+# Workaround for metalayerlab/project-template#63 (no extras hook): `--extra fuse` on both syncs.
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project --extra fuse
 
