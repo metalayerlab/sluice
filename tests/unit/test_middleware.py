@@ -180,22 +180,82 @@ def test_param_denial_lets_the_chain_observe_it() -> None:
     assert log == ["failed:a:ENOENT"]
 
 
-def test_also_runs_target_param_and_pre_hooks_not_in_source_chain() -> None:
+class PathRecorder(Recorder):
+    async def pre(self, ctx: Context) -> None:
+        self.log.append(f"pre:{self.name}:{ctx.display_path}")
+
+    async def post(self, ctx: Context, result: Any) -> Any:
+        self.log.append(f"post:{self.name}:{ctx.display_path}")
+        return result
+
+    async def failed(self, ctx: Context, error: FsError) -> None:
+        self.log.append(f"failed:{self.name}:{ctx.display_path}:{errno.errorcode[error.errno]}")
+
+
+def rename_contexts(table: RouteTable, source: str, target: str) -> tuple[Context, Context]:
+    return context(table, source, "rename"), context(table, target, "rename")
+
+
+def test_also_runs_shared_middleware_against_the_target_too() -> None:
     log: list[str] = []
-    shared = Recorder("shared", log)
     app = Sluice()
-    app.use(shared)
-    app.route("/a", backend="/a", middlewares=[Recorder("src", log)])
-    app.route("/b", backend="/b", middlewares=[Recorder("dst", log)])
-    table = app.freeze()
-    src = context(table, "/a/f", "rename")
-    dst = context(table, "/b/f", "rename")
+    app.use(PathRecorder("shared", log))
+    app.route("/a", backend="/a", middlewares=[PathRecorder("src", log)])
+    app.route("/b", backend="/b", middlewares=[PathRecorder("dst", log)])
+    src, dst = rename_contexts(app.freeze(), "/a/f", "/b/f")
 
     async def op(ctx: Context) -> None:
         log.append("op")
 
     run(src, op, also=[dst])
-    assert log == ["pre:shared", "pre:src", "pre:dst", "op", "post:src", "post:shared"]
+    assert log == [
+        "pre:shared:/a/f",
+        "pre:src:/a/f",
+        "pre:shared:/b/f",
+        "pre:dst:/b/f",
+        "op",
+        "post:dst:/b/f",
+        "post:shared:/b/f",
+        "post:src:/a/f",
+        "post:shared:/a/f",
+    ]
+
+
+def test_also_target_middleware_observes_a_failed_operation() -> None:
+    log: list[str] = []
+    app = Sluice()
+    app.route("/a", backend="/a", middlewares=[PathRecorder("src", log)])
+    app.route("/b", backend="/b", middlewares=[PathRecorder("dst", log)])
+    src, dst = rename_contexts(app.freeze(), "/a/f", "/b/f")
+
+    async def op(ctx: Context) -> None:
+        raise FsError(errno.ENOSPC)
+
+    with pytest.raises(FsError):
+        run(src, op, also=[dst])
+    assert log == [
+        "pre:src:/a/f",
+        "pre:dst:/b/f",
+        "failed:dst:/b/f:ENOSPC",
+        "failed:src:/a/f:ENOSPC",
+    ]
+
+
+def test_rename_within_one_route_is_authorised_against_the_target() -> None:
+    seen: list[str] = []
+
+    async def verify(user: Any, token: Any, real_path: Any, op: str) -> bool:
+        seen.append(str(real_path))
+        return "locked" not in str(real_path)
+
+    app = Sluice()
+    app.use(auth(verify))
+    app.route("/b", backend="/srv/b")
+    src, dst = rename_contexts(app.freeze(), "/b/a/f", "/b/locked/f")
+    with pytest.raises(FsError) as e:
+        run(src, also=[dst])
+    assert e.value.errno == errno.EACCES
+    assert seen == ["/srv/b/a/f", "/srv/b/locked/f"]
 
 
 def test_auth_default_allows_and_injected_verify_denies() -> None:

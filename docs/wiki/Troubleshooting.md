@@ -60,6 +60,10 @@ A middleware, `param()` callback or virtual handler raised something other than 
 
 sluice 0.1.1 and earlier: on a backed route, a `post` hook (or a `pre` hook via `ctx.respond`) that replaces `open`'s result with `Opened(data=...)` makes every `read` and `fsync` of that file fail with `EIO`; the log shows a `TypeError` from `os.pread` or `os.fsync`. Upgrade. Since the fix the file reads as the hook's data, and writes fail with `EROFS` (`Read-only file system`), as on a virtual route. Return `Opened(data=..., direct_io=True)`, as virtual routes do: otherwise the kernel trusts the backing file's size and can cut the data short or cache it. Until you upgrade, serve the content from a `virtual=True` route instead.
 
+### `mv` into a directory now fails with `Permission denied`
+
+In releases after sluice 0.1.1, a rename runs every middleware's `pre` hooks against the target path as well as the source, including middleware both paths share (an `app.use(auth(...))`, or any middleware when both paths are on one route). In 0.1.1 and earlier a shared middleware saw only the source, so `auth()` let a file be moved into a path its `verify` refuses. A `Permission denied` from `mv` (or `rename(2)`) now means `verify` or a `pre` hook refused the target: the access log shows `rename` with the target path and `EACCES`. Allow the move in `verify` if it should succeed. `access_log()` now logs a rename once for each path.
+
 ### `Permission denied` on everything below a path
 
 A `pre` hook or `param()` callback denied the call (`auth()` with a `verify` that returned False, or a `Deny`). The access log shows the op and path that got `EACCES`. `sluice resolve <path> --op <op>` lists the middleware that runs there.
