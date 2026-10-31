@@ -44,6 +44,10 @@ The module isn't on `sys.path`, or importing it raised the error shown. Set `app
 
 The routes don't validate. The message names the route and the problem. Fix the app, and use `sluice routes` to check it without mounting. The full list of checks is in [Writing an App](Writing-an-App#what-freeze-checks).
 
+### `error: mount.cache_ms: expected int, got 0.5` (or another number setting)
+
+A number setting (`mount.cache_ms`, `pipeline.slow_ms`, `io.threads`) holds something that isn't a whole number: a decimal, `true`/`false`, or a list. sluice refuses it rather than round it, since `0.5` would quietly become `0`. Write a whole number, e.g. `cache_ms: 500`. Environment variables are strings, so `SLUICE_MOUNT_CACHE_MS=500` works.
+
 ### `error: env.expose: not set in the environment: NAME`
 
 A variable in the `env.expose` allowlist isn't set in sluice's environment. Set it, or remove it from the list. Every exposed name must exist, because backend templates are rendered with it.

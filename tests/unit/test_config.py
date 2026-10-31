@@ -133,3 +133,24 @@ def test_env_expose_refuses_bad_names(tmp_path: Path) -> None:
 def test_numeric_limits(tmp_path: Path, var: str, value: str, match: str) -> None:
     with pytest.raises(ConfigError, match=match):
         load_config(tmp_path / "m.yaml", environ={var: value})
+
+
+@pytest.mark.parametrize(
+    ("yaml_text", "match"),
+    [
+        ("mount:\n  cache_ms: 0.5\n", r"mount\.cache_ms: expected int, got 0\.5"),
+        ("pipeline:\n  slow_ms: true\n", r"pipeline\.slow_ms: expected int, got True"),
+        ("io:\n  threads: 2.0\n", r"io\.threads: expected int, got 2\.0"),
+        ("io:\n  threads: [2]\n", r"io\.threads: expected int, got \[2\]"),
+    ],
+)
+def test_int_settings_reject_floats_and_bools_from_file(
+    write_config: Callable[..., Path], yaml_text: str, match: str
+) -> None:
+    with pytest.raises(ConfigError, match=match):
+        load_config(write_config(yaml_text), environ={})
+
+
+def test_int_settings_accept_env_strings(tmp_path: Path) -> None:
+    cfg = load_config(tmp_path / "m.yaml", environ={"SLUICE_MOUNT_CACHE_MS": " 250 "})
+    assert cfg.mount_cache_ms == 250
