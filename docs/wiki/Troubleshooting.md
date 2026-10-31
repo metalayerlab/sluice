@@ -12,6 +12,10 @@
 
 sluice stopped (crashed or was killed) without unmounting, and the kernel still has the mount. Every access fails, and `sluice mount` refuses the directory (`cannot read ...: a stale mount?`). Unmount it with `fusermount3 -u <mount.point>` (`umount -l` as root if it's busy), then start sluice again. Processes that had files open there need to reopen them.
 
+### `RuntimeError: Event loop is closed` on stop
+
+sluice 0.1.1 and earlier: a SIGTERM or SIGINT that arrives while sluice is already unmounting (after `fusermount3 -u`, say, while systemd or Kubernetes also stops it) crashes the cleanup, which can leave a stale mount. Upgrade; until then, recover as for `Transport endpoint is not connected` above.
+
 ### `error: /dev/fuse not found`
 
 The FUSE kernel module isn't loaded, or (in a container) the device wasn't passed in. On the host: `sudo modprobe fuse`. In Docker: `--device /dev/fuse --cap-add SYS_ADMIN`. In Kubernetes: a FUSE device plugin, or a privileged pod. See [Deployment](Deployment).

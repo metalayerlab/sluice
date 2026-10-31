@@ -103,3 +103,21 @@ def test_stopper_signal_before_loop() -> None:
 
     asyncio.run(go())
     assert calls == [1]
+
+
+def test_stopper_signal_after_loop_closed() -> None:
+    # A stop signal during serve()'s unmount cleanup, after asyncio.run() closed the loop (#5).
+    import asyncio
+    import signal
+
+    from sluice.mount import _Stopper
+
+    calls: list[int] = []
+    stopper = _Stopper(lambda: calls.append(1))
+
+    async def go() -> None:
+        stopper.started(asyncio.get_running_loop())
+
+    asyncio.run(go())
+    stopper.handle(signal.SIGTERM, None)
+    assert calls == []
