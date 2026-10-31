@@ -52,6 +52,10 @@ A param registered with `secret=True` is used where it would end up in a real pa
 
 A number setting (`mount.cache_ms`, `pipeline.slow_ms`, `io.threads`) holds something that isn't a whole number: a decimal, `true`/`false`, or a list. sluice refuses it rather than round it, since `0.5` would quietly become `0`. Write a whole number, e.g. `cache_ms: 500`. Environment variables are strings, so `SLUICE_MOUNT_CACHE_MS=500` works.
 
+### `error: mount.point: expected str, got ['a']` (or another text setting)
+
+A text setting holds a YAML list or mapping. sluice refuses it rather than use its Python text (`['a']`) as the value. Write a single value, e.g. `point: /mnt/data`. `env.expose` is a comma-separated string too: `expose: HOME,USER`, not a list.
+
 ### `error: env.expose: not set in the environment: NAME`
 
 A variable in the `env.expose` allowlist isn't set in sluice's environment. Set it, or remove it from the list. Every exposed name must exist, because backend templates are rendered with it.
@@ -67,6 +71,10 @@ sluice 0.1.1 and earlier: on a backed route, a `post` hook (or a `pre` hook via 
 ### `mv` into a directory now fails with `Permission denied`
 
 In releases after sluice 0.1.1, a rename runs every middleware's `pre` hooks against the target path as well as the source, including middleware both paths share (an `app.use(auth(...))`, or any middleware when both paths are on one route). In 0.1.1 and earlier a shared middleware saw only the source, so `auth()` let a file be moved into a path its `verify` refuses. A `Permission denied` from `mv` (or `rename(2)`) now means `verify` or a `pre` hook refused the target: the access log shows `rename` with the target path and `EACCES`. Allow the move in `verify` if it should succeed. `access_log()` now logs a rename once for each path.
+
+### A rename goes ahead although a target-side hook called `ctx.respond()`
+
+sluice 0.1.1 and earlier: during a `rename`, a `ctx.respond()` from a `pre` hook on the target's chain is ignored. The rename runs, the target's later `pre` hooks still run, and the call returns the operation's result. Upgrade. Until then, raise `Deny` (or another `FsError`) in that hook instead: a denial on the target side does stop the rename.
 
 ### `Permission denied` on everything below a path
 

@@ -155,8 +155,11 @@ def _coerce(setting: Setting, raw: Any) -> Value:
             if isinstance(raw, bool) or not isinstance(raw, int | str):
                 raise ValueError(raw)
             return int(raw)
+        # str() would turn a YAML list or mapping into its repr; scalars (1, 2.5) are fine.
+        if isinstance(raw, dict | list | set):
+            raise ValueError(raw)
     except ValueError:
-        kind = type(setting.default).__name__
+        kind = type(setting.default).__name__ if isinstance(setting.default, int) else "str"
         raise ConfigError(f"{setting.key}: expected {kind}, got {raw!r}") from None
     return str(raw)
 

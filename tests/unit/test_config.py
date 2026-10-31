@@ -154,3 +154,23 @@ def test_int_settings_reject_floats_and_bools_from_file(
 def test_int_settings_accept_env_strings(tmp_path: Path) -> None:
     cfg = load_config(tmp_path / "m.yaml", environ={"SLUICE_MOUNT_CACHE_MS": " 250 "})
     assert cfg.mount_cache_ms == 250
+
+
+@pytest.mark.parametrize(
+    ("yaml_text", "match"),
+    [
+        ("mount:\n  point: [a]\n", r"mount\.point: expected str, got \['a'\]"),
+        ("app:\n  module: {a: 1}\n", r"app\.module: expected str, got \{'a': 1\}"),
+        ("secrets:\n  dir: [/run]\n", r"secrets\.dir: expected str, got \['/run'\]"),
+    ],
+)
+def test_text_settings_reject_lists_and_mappings_from_file(
+    write_config: Callable[..., Path], yaml_text: str, match: str
+) -> None:
+    with pytest.raises(ConfigError, match=match):
+        load_config(write_config(yaml_text), environ={})
+
+
+def test_text_settings_accept_yaml_scalars(write_config: Callable[..., Path]) -> None:
+    cfg = load_config(write_config("mount:\n  fsname: 123\n"), environ={})
+    assert cfg.mount_fsname == "123"
