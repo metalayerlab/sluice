@@ -8,3 +8,37 @@
 
 # DEBUG, INFO, WARNING or ERROR
 log_level: INFO
+
+app:
+  # The app to serve, module:attribute (e.g. myroutes:app). Required.
+  module: ""
+  # Directory put first on sys.path before importing app.module. Empty: unchanged.
+  dir: ""
+
+mount:
+  # Where to mount: an existing, empty directory. Required by `sluice mount`.
+  point: ""
+  # Filesystem name shown by mount and df
+  fsname: sluice
+  # Let other users in (needs user_allow_other in /etc/fuse.conf)
+  allow_other: false
+  # Kernel entry/attribute cache in ms; above 0, cached calls skip middleware
+  cache_ms: 0
+  # libfuse request tracing; logs raw paths, tokens included: lab use only
+  debug: false
+
+io:
+  # Worker threads for backend syscalls
+  threads: 8
+
+env:
+  # Comma-separated environment variable names copied into ctx.config.env
+  expose: ""
+
+secrets:
+  # Each regular file becomes ctx.config.secret[<filename>]
+  dir: /run/secrets
+
+pipeline:
+  # Warn when a middleware or handler holds the event loop longer than this (ms); 0 = off
+  slow_ms: 0

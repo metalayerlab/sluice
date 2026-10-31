@@ -17,12 +17,19 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
 
 WORKDIR /build
 
+# Workaround for metalayerlab/project-template#53 (no system-packages hook yet): pyfuse3 ships
+# only an sdist and compiles against libfuse3. Remove when the hook lands.
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc libc6-dev libfuse3-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
 # Dependencies first, so a source change doesn't reinstall them
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project --extra fuse
 
 COPY src/ ./src/
-RUN uv sync --frozen --no-dev --no-editable
+RUN uv sync --frozen --no-dev --no-editable --extra fuse
 
 # ============================================================
 # Stage 2: runtime
@@ -41,6 +48,12 @@ LABEL org.opencontainers.image.title="sluice" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.created="${CREATED}"
+
+# Workaround for metalayerlab/project-template#53: fusermount3 and (as its dependency) libfuse3.
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fuse3 \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" \
