@@ -48,6 +48,8 @@ flowchart LR
 3. **`read(fh, offset, size)`.** The handle's resolution is reused: no re-routing, so an open file survives a rename as POSIX requires. A fresh `Context` is built and `param()` callbacks and the whole chain run again. `os.pread` runs in a worker thread, and `post` may replace the bytes.
 4. **`release(fh)`.** No middleware. The handle is dropped and the fd closed.
 
+**Unlinked and replaced files.** Unlinking a path, or renaming another file over it, *detaches* its inode: the inode loses its path but lives until the kernel forgets it. Path operations on it fail with `ENOENT`, since the old path now names nothing or another file. `getattr` and `setattr` (`fstat`, `ftruncate`, `fchmod`) go through an open handle instead, as `read` does: the handle's resolution and chain, and `fstat`/`ftruncate` on its fd. So temp files and atomic replace work while the file is open.
+
 **State.** The only state is in memory: the inode table, the handle table, and the frozen route table and `MountConfig`. Nothing is cached between calls. With `mount.cache_ms=0` the kernel caches nothing either, so every `stat` is a `lookup`/`getattr` through the pipeline. A restart loses all inodes, and processes that held files open on the old mount get `ENOTCONN`.
 
 **Failure.** Every failure becomes one errno for one call, and the mount carries on:

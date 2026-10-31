@@ -71,6 +71,18 @@ class Listed:
     next_id: int
 
 
+async def _orphan_getattr(impl: Impl, ctx: Context, handle: Handle) -> Attr:
+    if isinstance(impl, Passthrough):
+        return await impl.fgetattr(ctx, handle.opened)
+    return await impl.getattr(ctx)
+
+
+async def _orphan_setattr(impl: Impl, ctx: Context, handle: Handle) -> Attr:
+    if isinstance(impl, Passthrough):
+        return await impl.fsetattr(ctx, handle.opened)
+    return await impl.setattr(ctx)
+
+
 class Dispatcher:
     def __init__(self, table: RouteTable, passthrough: Passthrough) -> None:
         self.table = table
@@ -127,11 +139,13 @@ class Dispatcher:
         fh: int,
         operation: Callable[[Impl, Context, Handle], Awaitable[Any]],
         args: Any = None,
+        caller: Caller | None = None,
     ) -> Any:
         # An open file keeps the resolution it was opened with, as POSIX keeps it across a
-        # rename; the chain and param() callbacks still run on every call.
+        # rename; the chain and param() callbacks still run on every call. `caller` is the
+        # requester when the kernel names one; otherwise the opener.
         handle = self.handles.get(fh)
-        ctx = self._context(op, handle.resolution, handle.inode, args, handle.caller)
+        ctx = self._context(op, handle.resolution, handle.inode, args, caller or handle.caller)
         return await run_pipeline(ctx, lambda c: operation(handle.impl, c, handle))
 
     def _entry(self, path: PurePosixPath, attr: Attr) -> Entry:
@@ -149,13 +163,33 @@ class Dispatcher:
             self.inodes.forget(inode, count)
 
     async def getattr(self, inode: int, caller: Caller | None = None) -> Entry:
+        fh = self._orphan(inode)
+        if fh is not None:
+            return Entry(inode, await self._on_handle("getattr", fh, _orphan_getattr, None, caller))
         path = self.inodes.path(inode)
         return Entry(inode, await self._call("getattr", path, caller, lambda i, c: i.getattr(c)))
 
-    async def setattr(self, inode: int, args: SetattrArgs, caller: Caller | None = None) -> Entry:
+    async def setattr(
+        self,
+        inode: int,
+        args: SetattrArgs,
+        caller: Caller | None = None,
+        fh: int | None = None,
+    ) -> Entry:
+        orphan = self._orphan(inode, fh)
+        if orphan is not None:
+            attr = await self._on_handle("setattr", orphan, _orphan_setattr, args, caller)
+            return Entry(inode, attr)
         path = self.inodes.path(inode)
         attr = await self._call("setattr", path, caller, lambda i, c: i.setattr(c), args)
         return Entry(inode, attr)
+
+    def _orphan(self, inode: int, fh: int | None = None) -> int | None:
+        """The handle to serve a detached inode through: its path now names nothing, or
+        another file, but an open file still works on what it opened (`fstat`, `ftruncate`)."""
+        if not self.inodes.detached(inode):
+            return None
+        return fh if fh is not None else self.handles.find(inode)
 
     async def readlink(self, inode: int, caller: Caller | None = None) -> str:
         path = self.inodes.path(inode)

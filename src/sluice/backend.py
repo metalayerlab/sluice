@@ -35,6 +35,12 @@ def _real(ctx: Context) -> Path:
     return ctx.real_path
 
 
+def _fd(handle: Opened) -> int:
+    if handle.fd is None:
+        raise FsError(errno.ENOENT, "no backend fd")
+    return handle.fd
+
+
 def _rename(old: Path, new: Path, flags: int) -> None:
     if not flags:
         os.rename(old, new)
@@ -46,21 +52,28 @@ def _rename(old: Path, new: Path, flags: int) -> None:
         raise OSError(err, os.strerror(err))
 
 
-def _setattr(path: Path, args: Any) -> os.stat_result:
-    st = os.lstat(path)
+def _stat(target: Path | int) -> os.stat_result:
+    return os.fstat(target) if isinstance(target, int) else os.lstat(target)
+
+
+def _setattr(target: Path | int, args: Any) -> os.stat_result:
+    """Apply `args` to a path, without following a symlink, or to an open fd."""
+    # os functions reject follow_symlinks with an fd; an fd is never a symlink.
+    nofollow: dict[str, Any] = {} if isinstance(target, int) else {"follow_symlinks": False}
+    st = _stat(target)
     if args.mode is not None and not stat.S_ISLNK(st.st_mode):
-        os.chmod(path, stat.S_IMODE(args.mode))
+        os.chmod(target, stat.S_IMODE(args.mode))
     if args.uid is not None or args.gid is not None:
         uid = -1 if args.uid is None else args.uid
         gid = -1 if args.gid is None else args.gid
-        os.chown(path, uid, gid, follow_symlinks=False)
+        os.chown(target, uid, gid, **nofollow)
     if args.size is not None:
-        os.truncate(path, args.size)
+        os.truncate(target, args.size)
     if args.atime_ns is not None or args.mtime_ns is not None:
         atime = st.st_atime_ns if args.atime_ns is None else args.atime_ns
         mtime = st.st_mtime_ns if args.mtime_ns is None else args.mtime_ns
-        os.utime(path, ns=(atime, mtime), follow_symlinks=False)
-    return os.lstat(path)
+        os.utime(target, ns=(atime, mtime), **nofollow)
+    return _stat(target)
 
 
 def _mkdir(path: Path, mode: int) -> os.stat_result:
@@ -129,6 +142,13 @@ class Passthrough:
 
     async def setattr(self, ctx: Context) -> Attr:
         return Attr.from_stat(await self.run(_setattr, _real(ctx), ctx.args))
+
+    async def fgetattr(self, ctx: Context, handle: Opened) -> Attr:
+        """`getattr` through an open fd: the file it opened, whatever its path now names."""
+        return Attr.from_stat(await self.run(os.fstat, _fd(handle)))
+
+    async def fsetattr(self, ctx: Context, handle: Opened) -> Attr:
+        return Attr.from_stat(await self.run(_setattr, _fd(handle), ctx.args))
 
     async def readlink(self, ctx: Context) -> str:
         return await self.run(os.readlink, _real(ctx))
