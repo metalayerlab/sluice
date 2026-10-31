@@ -241,6 +241,11 @@ class Dispatcher:
                 await self._release(impl, o, dir_=op == "opendir")
             raise
         final = result[0] if isinstance(result, tuple) else result
+        # A post hook may replace the result (virtual content, say): the kernel releases only
+        # the replacement, so close what it dropped, unless the replacement reuses its fd.
+        for o in opened:
+            if o is not final and (o.fd is None or o.fd != final.fd):
+                await self._release(impl, o, dir_=op == "opendir")
         handle = Handle(res, 0, impl, final, ctx.caller)
         return result, handle
 
