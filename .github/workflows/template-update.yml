@@ -54,6 +54,14 @@ jobs:
             echo "NEEDS_LOCAL=1" >> "$GITHUB_ENV"
           fi
 
+      # Copier copies files, not labels; the issue and the PR below need this one.
+      - name: The template-update label exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh label create template-update --force
+          --color C5DEF5 --description "copier update from project-template"
+
       - name: Ask for a local update (no App, workflow files changed)
         if: env.NEEDS_LOCAL == '1'
         env:

@@ -1,0 +1,13 @@
+# System packages (Debian/Ubuntu apt) the project needs. Project-owned: `copier update`
+# never changes this file. Both lists are empty by default, and an empty list installs nothing.
+#
+# build:   compilers and headers that installing the dependencies needs (a dependency
+#          that builds from source): CI's test job and the image's builder stage
+# runtime: libraries and tools the installed project needs: the image's runtime stage
+#
+# Packages go after the colon, separated by spaces; repeat a line for more. For example:
+#   build: gcc pkg-config libfuse3-dev
+#   runtime: fuse3 libfuse3-3
+# pyfuse3 ships only an sdist and compiles against libfuse3; fuse3 gives fusermount3.
+build: gcc libc6-dev libfuse3-dev pkg-config
+runtime: fuse3

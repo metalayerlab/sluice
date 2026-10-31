@@ -39,6 +39,9 @@ jobs:
       - name: Markdown lint
         run: scripts/check-docs-secrets.sh docs
 
+      - name: .github/repository.toml is valid
+        run: python3 scripts/repo-metadata.py --validate
+
   docs-touched:
     name: Docs updated with the code
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'no-docs-needed') && !startsWith(github.head_ref, 'release-please--')
@@ -49,6 +52,21 @@ jobs:
           fetch-depth: 0
       - name: Watched paths changed without a docs/wiki/ change?
         run: python3 scripts/check-wiki.py --docs-touched "origin/${{ github.base_ref }}"
+
+  # Copier copies files, not labels: create the one docs-touched skips on, so a
+  # reviewer can add it. Its own job, so a repository without a wiki gets it too.
+  labels:
+    name: The no-docs-needed label exists
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh label create no-docs-needed --repo "$GITHUB_REPOSITORY" --force
+          --color BFD4F2 --description "Reviewer: nothing user-visible changed"
 
   publish:
     name: Publish to the GitHub wiki
@@ -81,3 +99,14 @@ jobs:
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
               commit -m "docs: publish from ${GITHUB_SHA::7}" -m "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA"
           git push
+
+      # A warning, not a failure: only a repository admin can fix it, outside any PR
+      # (project-template design record 0010). An invalid file still fails.
+      - name: GitHub's About box matches .github/repository.toml?
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          rc=0; python3 scripts/repo-metadata.py --check || rc=$?
+          if [ "$rc" = 1 ]; then
+            echo "::warning::GitHub's About box differs from .github/repository.toml: run python3 scripts/repo-metadata.py"
+          elif [ "$rc" != 0 ]; then exit "$rc"; fi
