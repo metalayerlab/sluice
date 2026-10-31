@@ -52,6 +52,16 @@ flowchart LR
 
 **State.** The only state is in memory: the inode table, the handle table, and the frozen route table and `MountConfig`. Nothing is cached between calls. With `mount.cache_ms=0` the kernel caches nothing either, so every `stat` is a `lookup`/`getattr` through the pipeline. A restart loses all inodes, and processes that held files open on the old mount get `ENOTCONN`.
 
+**Cost of the symlink-safe walk.** Every path op on a backend opens each directory below the literal prefix with `O_NOFOLLOW` (see [Security](Security#hardening)), one `open` and `close` per level, per call. Measured on tmpfs (8-core desktop, Linux 7.2; issue #28): in the backend alone that is about 12 µs per call plus 4 µs per level (`lstat` 2 µs → 16 µs at 1 level, 67 µs at 15), but a `stat` or `open` through the mount costs 0.5–1 ms even one level deep, so through the mount the walk adds:
+
+| Depth | `mount.cache_ms=0` | `mount.cache_ms=1000` |
+|---|---|---|
+| 1 level | 14–22% | up to 19% |
+| 5 levels | 22–24% | up to 29% |
+| 15 levels | 30–38% | up to 48% |
+
+The ranges span `stat`, `open`+`read`, `readdir`, and an `os.walk` + `lstat` of a tree (as `find` or `ls -lR` do). With `cache_ms=0` a `stat` of a deep path looks up every component, each walking its own depth, so deep trees pay the most. Cached `stat`s never reach sluice, so they pay nothing. A single-syscall `openat2(RESOLVE_BENEATH)` or cached directory fds could remove at most that share; the rest is the per-call FUSE and pipeline cost.
+
 **Failure.** Every failure becomes one errno for one call, and the mount carries on:
 
 - `FsError` / `Deny` from a hook, callback or handler: its errno. `OSError` from the operation: its own errno.
