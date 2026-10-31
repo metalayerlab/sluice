@@ -23,6 +23,7 @@ from sluice import (
     Sluice,
     VirtualHandler,
     access_log,
+    auth,
 )
 from sluice.backend import Passthrough
 from sluice.context import Caller, SetattrArgs
@@ -225,6 +226,33 @@ def test_rename_into_private_is_gated(dispatcher: Dispatcher) -> None:
         await dispatcher.rename(home, "notes.txt", home, "private")
 
     assert errno_of(go) == errno.EACCES
+
+
+def test_rename_within_a_route_is_refused_when_the_target_is(tmp_path: Path) -> None:
+    (tmp_path / "a").mkdir()
+    (tmp_path / "locked").mkdir()
+    (tmp_path / "a" / "f").write_text("f", encoding="utf-8")
+
+    async def verify(user: Any, token: Any, real_path: Path | None, op: str) -> bool:
+        return op != "rename" or real_path is None or "locked" not in real_path.parts
+
+    app = Sluice()
+    app.use(auth(verify))
+    app.route("/b", backend=str(tmp_path))
+    io = Passthrough(1)
+    d = Dispatcher(app.freeze(), io)
+
+    async def go() -> None:
+        src = await walk(d, "/b/a")
+        dst = await walk(d, "/b/locked")
+        await d.rename(src, "f", dst, "f")
+
+    try:
+        assert errno_of(go) == errno.EACCES
+    finally:
+        io.shutdown()
+    assert (tmp_path / "a" / "f").exists()
+    assert not (tmp_path / "locked" / "f").exists()
 
 
 def test_rename_across_backends_is_exdev(dispatcher: Dispatcher) -> None:

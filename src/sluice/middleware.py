@@ -127,8 +127,8 @@ def _as_fs_error(ctx: Context, e: Exception, stage: str) -> FsError:
     return FsError(errno.EIO)
 
 
-async def _failed(ctx: Context, ran: Sequence[Middleware], error: FsError) -> None:
-    for mw in reversed(ran):
+async def _failed(ran: Sequence[tuple[Middleware, Context]], error: FsError) -> None:
+    for mw, ctx in reversed(ran):
         try:
             await mw.failed(ctx, error)
         except Exception:
@@ -150,17 +150,19 @@ async def run_pipeline(
 ) -> Any:
     """Run `ctx`'s middleware chain around `operation`. Raises `FsError` on any failure.
 
-    `also` are contexts for a second path (rename's target): their `param()` callbacks and
-    the `pre` hooks of middleware not already in `ctx`'s chain run too, before the operation.
+    `also` are contexts for a second path (rename's target): before the operation, their
+    `param()` callbacks and their whole chain's `pre` hooks run too, with that context. A
+    middleware on both chains runs once per path, so `auth()` checks the target as well.
+    Every hook that ran `pre` gets `post` or `failed` with the same context.
     """
     chain = [mw for mw in ctx.resolution.middlewares if mw.applies(ctx.op)]
-    ran: list[Middleware] = []
+    ran: list[tuple[Middleware, Context]] = []
     stage = "param()"
     try:
         await run_params(ctx, ctx.resolution.param_specs)
         stage = "pre"
         for mw in chain:
-            ran.append(mw)
+            ran.append((mw, ctx))
             await mw.pre(ctx)
             if ctx.responded:
                 break
@@ -168,19 +170,20 @@ async def run_pipeline(
             for other in also:
                 await run_params(other, other.resolution.param_specs)
                 for mw in other.resolution.middlewares:
-                    if mw.applies(other.op) and mw not in chain:
+                    if mw.applies(other.op):
+                        ran.append((mw, other))
                         await mw.pre(other)
             stage = "operation"
             result = await operation(ctx)
         else:
             result = ctx.response
         stage = "post"
-        for mw in reversed(ran):
-            result = await mw.post(ctx, result)
+        for mw, mw_ctx in reversed(ran):
+            result = await mw.post(mw_ctx, result)
     except Exception as e:
         error = _as_fs_error(ctx, e, stage)
         # A param() failure comes before any pre hook; let the whole chain observe it.
-        await _failed(ctx, chain if stage == "param()" else ran, error)
+        await _failed([(mw, ctx) for mw in chain] if stage == "param()" else ran, error)
         raise error from e
     return result
 

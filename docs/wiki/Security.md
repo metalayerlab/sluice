@@ -40,7 +40,7 @@ sluice's own settings hold no secrets. Your app's secrets, if it has any, are fi
 - **Paths:** the router matches whole segments only and never interprets them. A rendered real path is normalised and must stay under its backend template's literal prefix: `..` in a captured value can't escape (`EACCES`). Paths no route covers don't exist.
 - **Routes are validated before mounting:** params in templates must be captured, `{env.*}` must be allowlisted, `{secret.*}` and secret params are refused in templates, and every hook must be `async`.
 - **Environment:** only variables named in `env.expose` reach the app, and `SLUICE_*` names are refused.
-- **Authorisation** is middleware: `auth(verify)` with an injected `async verify(user, token, real_path, op)`, or your own `pre` hooks. `rename` is authorised against both its source and target routes. With `mount.cache_ms` above 0, cached lookups and attributes skip middleware.
+- **Authorisation** is middleware: `auth(verify)` with an injected `async verify(user, token, real_path, op)`, or your own `pre` hooks. `rename` is authorised against both its source and target paths: every `pre` hook on the target's chain runs with the target's context, including a middleware the source chain also has. With `mount.cache_ms` above 0, cached lookups and attributes skip middleware.
 - **Failure is closed:** an exception in a `post` hook returns `EIO`, never the unmodified result. Any unexpected exception is `EIO`, never a crash of the mount.
 - **Not provided:** rate limiting, or protection against a caller who floods the mount. One event loop serves everyone, so a slow middleware slows every caller.
 
