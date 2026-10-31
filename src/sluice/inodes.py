@@ -2,7 +2,8 @@
 
 FUSE calls name files by inode or handle, never by path; the router needs paths. `InodeTable`
 keeps the two consistent across create, rename and unlink. Inodes are per virtual path: two
-virtual paths to one real file are two inodes.
+virtual paths to one real file are two inodes. An inode whose path is unlinked or renamed over is
+detached: it has no path, but lives on until the kernel forgets it, as its open files do.
 """
 
 from __future__ import annotations
@@ -30,9 +31,12 @@ class InodeTable:
         self._path: dict[int, PurePosixPath] = {ROOT_INODE: ROOT}
         self._inode: dict[PurePosixPath, int] = {ROOT: ROOT_INODE}
         self._lookups: dict[int, int] = {}
+        self._detached: set[int] = set()
         self._next = itertools.count(ROOT_INODE + 1)
 
     def path(self, inode: int) -> PurePosixPath:
+        if inode in self._detached:
+            raise FsError(errno.ENOENT, f"inode {inode} was unlinked or renamed over")
         try:
             return self._path[inode]
         except KeyError:
@@ -45,6 +49,9 @@ class InodeTable:
         if name == "..":
             return base.parent
         return base / name
+
+    def detached(self, inode: int) -> bool:
+        return inode in self._detached
 
     def find(self, path: PurePosixPath) -> int:
         """The inode of `path`, or 0 if it has none yet."""
@@ -76,15 +83,20 @@ class InodeTable:
             self._lookups[inode] = left
             return
         self._lookups.pop(inode, None)
+        self._detached.discard(inode)
         path = self._path.pop(inode, None)
         if path is not None and self._inode.get(path) == inode:
             del self._inode[path]
 
     def _detach(self, path: PurePosixPath) -> None:
-        """Drop `path` and everything under it. Their inodes live on until forgotten."""
+        """Drop `path` and everything under it. Inodes the kernel holds live on, detached, until
+        forgotten; the rest (seen only in a `readdir` it didn't take) go now, as no forget comes."""
         for p in [p for p in self._inode if p == path or p.is_relative_to(path)]:
             inode = self._inode.pop(p)
-            del self._path[inode]
+            if self._lookups.get(inode, 0) > 0:
+                self._detached.add(inode)
+            else:
+                del self._path[inode]
 
     def unlink(self, path: PurePosixPath) -> None:
         self._detach(path)
@@ -138,6 +150,12 @@ class HandleTable:
             return self._handles[fh]
         except KeyError:
             raise FsError(errno.EBADF) from None
+
+    def find(self, inode: int) -> int | None:
+        """An open handle on `inode`, preferring one with a backend fd."""
+        found = [fh for fh, h in self._handles.items() if h.inode == inode]
+        with_fd = [fh for fh in found if self._handles[fh].opened.fd is not None]
+        return next(iter(with_fd or found), None)
 
     def pop(self, fh: int) -> Handle | None:
         return self._handles.pop(fh, None)

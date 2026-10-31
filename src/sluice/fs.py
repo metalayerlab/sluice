@@ -122,7 +122,7 @@ class SluiceOperations:
             atime_ns=attr.st_atime_ns if fields.update_atime else None,
             mtime_ns=attr.st_mtime_ns if fields.update_mtime else None,
         )
-        return self._attrs(await self.d.setattr(inode, args, _caller(ctx)))
+        return self._attrs(await self.d.setattr(inode, args, _caller(ctx), fh))
 
     @_guard
     async def readlink(self, inode: int, ctx: pyfuse3.RequestContext) -> bytes:

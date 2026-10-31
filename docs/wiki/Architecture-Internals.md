@@ -48,6 +48,8 @@ flowchart LR
 3. **`read(fh, offset, size)`.** The handle's resolution is reused: no re-routing, so an open file survives a rename as POSIX requires. A fresh `Context` is built and `param()` callbacks and the whole chain run again. `os.pread` runs in a worker thread, and `post` may replace the bytes.
 4. **`release(fh)`.** No middleware. The handle is dropped and the fd closed.
 
+**Unlinked and replaced files.** Unlinking a path, or renaming another file over it, *detaches* its inode: the inode loses its path but lives until the kernel forgets it. Path operations on it fail with `ENOENT`, since the old path now names nothing or another file. `getattr` and `setattr` (`fstat`, `ftruncate`, `fchmod`) go through an open handle instead, as `read` does: the handle's resolution and chain, and `fstat`/`ftruncate` on its fd. So temp files and atomic replace work while the file is open.
+
 **State.** The only state is in memory: the inode table, the handle table, and the frozen route table and `MountConfig`. Nothing is cached between calls. With `mount.cache_ms=0` the kernel caches nothing either, so every `stat` is a `lookup`/`getattr` through the pipeline. A restart loses all inodes, and processes that held files open on the old mount get `ENOTCONN`.
 
 **Failure.** Every failure becomes one errno for one call, and the mount carries on:
@@ -55,6 +57,7 @@ flowchart LR
 - `FsError` / `Deny` from a hook, callback or handler: its errno. `OSError` from the operation: its own errno.
 - Any other exception in a callback, hook or operation: logged at ERROR with the correlation id and traceback, `EIO` to the caller. In a `post` hook too: `post` fails closed.
 - If the operation opened something (`open`, `create`, `opendir`) and a later hook fails, the dispatcher closes it before replying, since the kernel never gets a handle to release.
+- If a `post` hook replaces what `open`, `create` or `opendir` returned, the dispatcher closes the original's fd at once, unless the replacement keeps it. The kernel releases only the replacement, so an original without an fd is never released. A hook that returns anything but an `Opened` fails the call with `EIO`.
 - `fs.py` turns `FsError` into `pyfuse3.FUSEError`, and anything unexpected that reaches it into `EIO`. pyfuse3 stops the whole mount on any other exception.
 - No call is retried. The kernel and the caller decide.
 

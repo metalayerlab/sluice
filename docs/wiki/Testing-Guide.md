@@ -19,7 +19,7 @@ CI runs the unit tests on every supported Python version, together with ruff, my
 | `tests/conftest.py` | Shared fixtures: `clean_env` (no `SLUICE_*` leakage), `write_config` |
 | `tests/unit/test_routing.py` | Patterns, specificity, the three backend states, synthetic directories, templates, every `freeze()` validation error |
 | `tests/unit/test_middleware.py` | Pipeline order, short-circuit, `failed`, fail-closed `post`, `param()` callbacks, two-path `rename`, `auth()`, `access_log()` masking |
-| `tests/unit/test_dispatch.py` | The `Dispatcher` end to end against a temporary directory: the requirements' four example apps, readdir merging, rename, cleanup of failed opens |
+| `tests/unit/test_dispatch.py` | The `Dispatcher` end to end against a temporary directory: the requirements' four example apps, readdir merging, rename, open files that outlive unlink or replace, cleanup of failed opens |
 | `tests/unit/test_inodes.py`, `test_app.py`, `test_mount.py`, `test_cli.py` | The inode table; app loading, `MountConfig` and secrets, virtual handler defaults; mount-point checks and signal handling; the commands |
 | `tests/integration/test_mount.py` | `sluice mount` in a subprocess, used through the kernel; fails if the daemon logs a traceback or a token |
 
