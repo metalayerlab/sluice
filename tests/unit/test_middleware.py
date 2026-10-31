@@ -1,6 +1,8 @@
 import asyncio
 import errno
 import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -48,64 +50,237 @@ def run(ctx: Context, operation: Any = None, **kw: Any) -> Any:
     return asyncio.run(run_pipeline(ctx, operation or default, **kw))
 
 
-def test_order_pre_then_operation_then_post_in_reverse() -> None:
-    log: list[str] = []
+# Each run_pipeline rule, checked on every side of a call: `alone` (no `also`), `source` (the
+# primary context of a two-path op such as rename) and `target` (its `also` context). The tested
+# side's events must be identical on every side; #26 and #27 were rules that held on the source
+# chain only.
 
-    async def op(ctx: Context) -> bytes:
+TESTED, BYSTANDER = "/t/x/f", "/o/f"
+
+
+class Probe(Recorder):
+    """A Recorder that flags any hook run with another side's context."""
+
+    def __init__(
+        self, name: str, log: list[str], ops: frozenset[str] | None = None, where: str = TESTED
+    ) -> None:
+        super().__init__(name, log, ops)
+        self.where = where
+
+    def note(self, ctx: Context, event: str) -> None:
+        wrong = "" if ctx.display_path == self.where else f"@{ctx.display_path}"
+        self.log.append(f"{event}:{self.name}{wrong}")
+
+    async def pre(self, ctx: Context) -> None:
+        self.note(ctx, "pre")
+
+    async def post(self, ctx: Context, result: Any) -> Any:
+        self.note(ctx, "post")
+        return result
+
+    async def failed(self, ctx: Context, error: FsError) -> None:
+        self.note(ctx, f"failed:{errno.errorcode[error.errno]}")
+
+
+class Answer(Probe):
+    async def pre(self, ctx: Context) -> None:
+        await super().pre(ctx)
+        ctx.respond(b"answered")
+
+
+class Gate(Probe):
+    async def pre(self, ctx: Context) -> None:
+        await super().pre(ctx)
+        raise Deny()
+
+
+class Boom(Probe):
+    async def pre(self, ctx: Context) -> None:
+        await super().pre(ctx)
+        raise RuntimeError("bug")
+
+
+class Upper(Probe):
+    async def post(self, ctx: Context, result: Any) -> Any:
+        await super().post(ctx, result)
+        return result.upper()
+
+
+class BrokenPost(Probe):
+    async def post(self, ctx: Context, result: Any) -> Any:
+        await super().post(ctx, result)
+        raise ValueError("redaction failed")
+
+
+class NoisyFailed(Probe):
+    async def failed(self, ctx: Context, error: FsError) -> None:
+        await super().failed(ctx, error)
+        raise RuntimeError("in failed")
+
+
+@dataclass(frozen=True)
+class Rule:
+    chain: Callable[[list[str]], list[object]]
+    events: list[str]  # the tested side's: its hooks, its param() callback and the operation
+    result: bytes = b"op"
+    error: int | None = None  # the errno the call fails with; `result` is then unused
+    param: str | None = None  # the param() callback: "upper", or "deny" / "crash" to raise
+    raises: BaseException | None = None  # what the operation raises
+    stops_in_pre: bool = False  # the tested chain ends the call before the operation
+    post_fails: bool = False
+
+
+def _look(log: list[str]) -> Callable[[Context], Awaitable[None]]:
+    async def look(ctx: Context) -> None:
+        log.append(f"look:{ctx.params['p']}")
+
+    return look
+
+
+RULES = {
+    "pre-in-order-post-in-reverse": Rule(
+        lambda log: [Probe("a", log), Probe("b", log)],
+        ["pre:a", "pre:b", "op", "post:b", "post:a"],
+    ),
+    "post-replaces-the-result": Rule(
+        lambda log: [Probe("a", log), Upper("u", log)],
+        ["pre:a", "pre:u", "op", "post:u", "post:a"],
+        result=b"OP",
+    ),
+    "ops-filter-skips-middleware": Rule(
+        lambda log: [Probe("w", log, frozenset({"write"})), Probe("a", log)],
+        ["pre:a", "op", "post:a"],
+    ),
+    "param-transforms-before-pre": Rule(
+        lambda log: [_look(log), Probe("a", log)],
+        ["param:x", "look:X", "pre:a", "op", "post:a"],
+        param="upper",
+    ),
+    "respond-skips-later-pre-and-the-op": Rule(
+        lambda log: [Probe("a", log), Answer("r", log), Probe("b", log)],
+        ["pre:a", "pre:r", "post:r", "post:a"],
+        result=b"answered",
+        stops_in_pre=True,
+    ),
+    "deny-is-eacces-to-the-run-hooks": Rule(
+        lambda log: [Probe("a", log), Gate("g", log), Probe("b", log)],
+        ["pre:a", "pre:g", "failed:EACCES:g", "failed:EACCES:a"],
+        error=errno.EACCES,
+        stops_in_pre=True,
+    ),
+    "param-failure-reaches-the-whole-chain": Rule(
+        lambda log: [Probe("a", log), Probe("b", log)],
+        ["param:x", "failed:ENOENT:b", "failed:ENOENT:a"],
+        error=errno.ENOENT,
+        param="deny",
+        stops_in_pre=True,
+    ),
+    "unexpected-param-error-is-eio": Rule(
+        lambda log: [Probe("a", log)],
+        ["param:x", "failed:EIO:a"],
+        error=errno.EIO,
+        param="crash",
+        stops_in_pre=True,
+    ),
+    "unexpected-pre-error-is-eio": Rule(
+        lambda log: [Probe("a", log), Boom("x", log), Probe("b", log)],
+        ["pre:a", "pre:x", "failed:EIO:x", "failed:EIO:a"],
+        error=errno.EIO,
+        stops_in_pre=True,
+    ),
+    "fs-error-from-the-op-passes-through": Rule(
+        lambda log: [Probe("a", log)],
+        ["pre:a", "op", "failed:ENOSPC:a"],
+        error=errno.ENOSPC,
+        raises=FsError(errno.ENOSPC),
+    ),
+    "oserror-from-the-op-keeps-its-errno": Rule(
+        lambda log: [Probe("a", log)],
+        ["pre:a", "op", "failed:ENOENT:a"],
+        error=errno.ENOENT,
+        raises=FileNotFoundError(errno.ENOENT, "gone"),
+    ),
+    "oserror-without-errno-is-eio": Rule(
+        lambda log: [Probe("a", log)],
+        ["pre:a", "op", "failed:EIO:a"],
+        error=errno.EIO,
+        raises=OSError("no errno"),
+    ),
+    "unexpected-op-error-is-eio": Rule(
+        lambda log: [Probe("a", log)],
+        ["pre:a", "op", "failed:EIO:a"],
+        error=errno.EIO,
+        raises=RuntimeError("bug"),
+    ),
+    "post-failure-is-eio-to-every-run-hook": Rule(
+        lambda log: [Probe("a", log), BrokenPost("x", log)],
+        ["pre:a", "pre:x", "op", "post:x", "failed:EIO:x", "failed:EIO:a"],
+        error=errno.EIO,
+        post_fails=True,
+    ),
+    "failed-hook-error-is-swallowed": Rule(
+        lambda log: [Probe("a", log), NoisyFailed("n", log)],
+        ["pre:a", "pre:n", "op", "failed:ENOSPC:n", "failed:ENOSPC:a"],
+        error=errno.ENOSPC,
+        raises=FsError(errno.ENOSPC),
+    ),
+}
+
+
+def _param(log: list[str], mode: str) -> Callable[[Context, Any], Awaitable[Any]]:
+    async def func(ctx: Context, raw: Any) -> Any:
+        log.append(f"param:{raw}")
+        if mode == "deny":
+            raise FsError(errno.ENOENT, "no such p")
+        if mode == "crash":
+            raise RuntimeError("bug")
+        return raw.upper()
+
+    return func
+
+
+@pytest.mark.parametrize("side", ["alone", "source", "target"])
+@pytest.mark.parametrize("rule", RULES.values(), ids=RULES.keys())
+def test_each_pipeline_rule_holds_on_every_side(rule: Rule, side: str) -> None:
+    log: list[str] = []
+    other: list[str] = []
+    app = Sluice()
+    if rule.param:
+        app.param("p", _param(log, rule.param))
+    app.route("/t/{p}", backend="/b", middlewares=rule.chain(log))
+    app.route("/o", backend="/o", middlewares=[Probe("o", other, where=BYSTANDER)])
+    table = app.freeze()
+    tested, bystander = context(table, TESTED, "rename"), context(table, BYSTANDER, "rename")
+
+    async def operation(ctx: Context) -> bytes:
         log.append("op")
-        return b"x"
+        if rule.raises is not None:
+            raise rule.raises
+        return b"op"
 
-    ctx = context(make(Recorder("a", log), Recorder("b", log)))
-    assert run(ctx, op) == b"x"
-    assert log == ["pre:a", "pre:b", "op", "post:b", "post:a"]
+    primary, also = {
+        "alone": (tested, []),
+        "source": (tested, [bystander]),
+        "target": (bystander, [tested]),
+    }[side]
+    if rule.error is None:
+        assert run(primary, operation, also=also) == rule.result
+    else:
+        with pytest.raises(FsError) as e:
+            run(primary, operation, also=also)
+        assert e.value.errno == rule.error
+    assert log == rule.events
 
-
-def test_post_replaces_result() -> None:
-    class Upper(Middleware):
-        async def post(self, ctx: Context, result: Any) -> Any:
-            return result.upper()
-
-    assert run(context(make(Upper()))) == b"DATA"
-
-
-def test_respond_short_circuits() -> None:
-    log: list[str] = []
-
-    class Cached(Middleware):
-        async def pre(self, ctx: Context) -> None:
-            ctx.respond(b"cached")
-
-    async def op(ctx: Context) -> bytes:
-        log.append("op")
-        return b"x"
-
-    ctx = context(make(Recorder("a", log), Cached(), Recorder("b", log)))
-    assert run(ctx, op) == b"cached"
-    assert log == ["pre:a", "post:a"]
-
-
-def test_deny_in_pre_runs_failed_in_reverse_including_raiser() -> None:
-    log: list[str] = []
-
-    class Gate(Recorder):
-        async def pre(self, ctx: Context) -> None:
-            await super().pre(ctx)
-            raise Deny()
-
-    ctx = context(make(Recorder("a", log), Gate("g", log), Recorder("b", log)))
-    with pytest.raises(FsError) as e:
-        run(ctx)
-    assert e.value.errno == errno.EACCES
-    assert log == ["pre:a", "pre:g", "failed:g:EACCES", "failed:a:EACCES"]
-
-
-def test_oserror_from_operation_keeps_its_errno() -> None:
-    async def op(ctx: Context) -> None:
-        raise FileNotFoundError(errno.ENOENT, "gone")
-
-    with pytest.raises(FsError) as e:
-        run(context(make()), op)
-    assert e.value.errno == errno.ENOENT
+    # The bystander chain ran pre unless the tested source chain ended the call first.
+    outcome = ["post:o"] if rule.error is None else [f"failed:{errno.errorcode[rule.error]}:o"]
+    if side == "source" and rule.post_fails:
+        outcome = ["post:o", *outcome]  # post runs in reverse: the target's before the source's
+    expected = {
+        "alone": [],
+        "source": [] if rule.stops_in_pre else ["pre:o", *outcome],
+        "target": ["pre:o", *outcome],
+    }[side]
+    assert other == expected
 
 
 def test_unexpected_error_in_pre_is_eio_and_logged(caplog: pytest.LogCaptureFixture) -> None:
@@ -117,20 +292,6 @@ def test_unexpected_error_in_pre_is_eio_and_logged(caplog: pytest.LogCaptureFixt
     assert e.value.errno == errno.EIO
     assert "unexpected error in pre [c1]" in caplog.text
     assert "T0k" in caplog.text  # not a secret param here
-
-
-def test_post_fails_closed() -> None:
-    log: list[str] = []
-
-    class Broken(Middleware):
-        async def post(self, ctx: Context, result: Any) -> Any:
-            raise ValueError("redaction failed")
-
-    ctx = context(make(Recorder("a", log), Broken()))
-    with pytest.raises(FsError) as e:
-        run(ctx)
-    assert e.value.errno == errno.EIO
-    assert log == ["pre:a", "failed:a:EIO"]
 
 
 def test_failed_hook_errors_are_ignored(caplog: pytest.LogCaptureFixture) -> None:
@@ -145,39 +306,6 @@ def test_failed_hook_errors_are_ignored(caplog: pytest.LogCaptureFixture) -> Non
         run(context(make(Noisy())), op)
     assert e.value.errno == errno.ENOSPC
     assert "ignored" in caplog.text
-
-
-def test_ops_filter() -> None:
-    log: list[str] = []
-    ctx = context(make(Recorder("w", log, frozenset({"write"}))), op="read")
-    run(ctx)
-    assert log == []
-
-
-def test_param_callbacks_transform_and_run_before_pre() -> None:
-    seen: list[object] = []
-
-    async def decode(ctx: Context, raw: Any) -> Any:
-        return {"token": raw}
-
-    async def look(ctx: Context) -> None:
-        seen.append(ctx.params["token"])
-
-    ctx = context(make(look, params={"token": (decode, True)}))
-    run(ctx)
-    assert seen == [{"token": "T0k"}]
-
-
-def test_param_denial_lets_the_chain_observe_it() -> None:
-    log: list[str] = []
-
-    async def reject(ctx: Context, raw: Any) -> Any:
-        raise FsError(errno.ENOENT, "no such user")
-
-    ctx = context(make(Recorder("a", log), params={"user": (reject, False)}))
-    with pytest.raises(FsError):
-        run(ctx)
-    assert log == ["failed:a:ENOENT"]
 
 
 class PathRecorder(Recorder):
