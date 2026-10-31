@@ -125,7 +125,8 @@ class _Stopper:
             return
         self.stopping = True
         log.info("%s: unmounting", signal.Signals(signum).name)
-        if self.loop is not None:
+        # A closed loop means serve() is already unmounting; raising here would abort that.
+        if self.loop is not None and not self.loop.is_closed():
             self.loop.call_soon_threadsafe(self.terminate)
 
     def started(self, loop: asyncio.AbstractEventLoop) -> None:
