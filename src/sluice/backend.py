@@ -179,10 +179,17 @@ class Passthrough:
         fd, st = await self.run(_create, _real(ctx), ctx.args.flags, ctx.args.mode)
         return Opened(fd=fd, direct_io=ctx.resolution.direct_io), Attr.from_stat(st)
 
+    # A hook may replace `open`'s result with an fd-less one (virtual content, say): serve
+    # it as `VirtualHandler` would, a read-only snapshot.
     async def read(self, ctx: Context, handle: Opened) -> bytes:
+        if handle.fd is None:
+            offset: int = ctx.args.offset
+            return handle.data[offset : offset + ctx.args.size]
         return await self.run(os.pread, handle.fd, ctx.args.size, ctx.args.offset)
 
     async def write(self, ctx: Context, handle: Opened) -> int:
+        if handle.fd is None:
+            raise FsError(errno.EROFS, "a hook replaced the open fd")
         return await self.run(os.pwrite, handle.fd, ctx.args.data, ctx.args.offset)
 
     async def flush(self, ctx: Context, handle: Opened) -> None:
@@ -190,7 +197,8 @@ class Passthrough:
             await self.run(_flush, handle.fd)
 
     async def fsync(self, ctx: Context, handle: Opened) -> None:
-        await self.run(os.fdatasync if ctx.args.datasync else os.fsync, handle.fd)
+        if handle.fd is not None:
+            await self.run(os.fdatasync if ctx.args.datasync else os.fsync, handle.fd)
 
     async def release(self, handle: Opened) -> None:
         if handle.fd is not None:
