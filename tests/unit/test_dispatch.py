@@ -6,6 +6,7 @@ import logging
 import os
 import stat
 from collections.abc import Awaitable, Callable, Iterator
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -17,6 +18,7 @@ from sluice import (
     FsError,
     Middleware,
     MountConfig,
+    Opened,
     Secret,
     Sluice,
     VirtualHandler,
@@ -321,6 +323,82 @@ def test_post_failure_on_open_closes_the_handle(backing: Path) -> None:
     io.shutdown()
     assert len(closed) == 2 and isinstance(closed[0], int)
     assert len(d.handles) == 0
+
+
+def test_post_replacing_opened_closes_the_dropped_handle(backing: Path) -> None:
+    closed: list[int | None] = []
+
+    class Serve(Middleware):
+        ops = frozenset({"open", "create"})
+
+        async def post(self, ctx: Context, result: Any) -> Any:
+            if ctx.path.name == "notes.txt":
+                return Opened(data=b"served")
+            if isinstance(result, tuple):  # create: keep the fd, change a flag
+                return replace(result[0], direct_io=True), result[1]
+            return result
+
+    class Io(Passthrough):
+        async def release(self, handle: Any) -> None:
+            closed.append(handle.fd)
+            await super().release(handle)
+
+    app = Sluice()
+    app.route("/b", backend=str(backing), middlewares=[Serve()])
+    io = Io(1)
+    d = Dispatcher(app.freeze(), io)
+
+    async def go() -> bytes:
+        info = await d.open(await walk(d, "/b/alice/notes.txt"), os.O_RDONLY)
+        assert len(closed) == 1 and isinstance(closed[0], int)  # the dropped fd, at once
+        await d.release(info.fh)
+        assert closed[1:] == [None]  # the replacement
+        made, _ = await d.create(await walk(d, "/b/alice"), "new.txt", 0o644, os.O_RDWR)
+        assert len(closed) == 2  # the replacement shares the fd: still open
+        await d.write(made.fh, 0, b"kept")
+        await d.release(made.fh)
+        return (backing / "alice" / "new.txt").read_bytes()
+
+    assert run(go()) == b"kept"
+    io.shutdown()
+    assert len(closed) == 3 and isinstance(closed[2], int)
+
+
+def test_post_replacing_opened_without_fd_or_with_junk(backing: Path) -> None:
+    released: list[int | None] = []
+
+    class Tweak(Middleware):
+        ops = frozenset({"open"})
+
+        async def post(self, ctx: Context, result: Any) -> Any:
+            return None if ctx.path.name == "notes.txt" else replace(result, keep_cache=True)
+
+    class Counted(Status):
+        async def release(self, handle: Opened) -> None:
+            released.append(handle.fd)
+
+    class Io(Passthrough):
+        async def release(self, handle: Any) -> None:
+            released.append(handle.fd)
+            await super().release(handle)
+
+    app = Sluice()
+    app.route("/b", backend=str(backing), middlewares=[Tweak()])
+    app.route("/v/{user}", virtual=True, handler=Counted(), middlewares=[Tweak()])
+    io = Io(1)
+    d = Dispatcher(app.freeze(), io)
+    notes = run(walk(d, "/b/alice/notes.txt"))
+    assert errno_of(lambda: d.open(notes, os.O_RDONLY)) == errno.EIO
+    assert len(released) == 1 and isinstance(released[0], int)  # the fd is closed
+
+    async def go() -> None:
+        info = await d.open(await walk(d, "/v/alice"), os.O_RDONLY)
+        assert info.keep_cache and len(released) == 1  # the copy isn't released early
+        await d.release(info.fh)
+
+    run(go())
+    io.shutdown()
+    assert released[1:] == [None]  # released once, by the kernel
 
 
 def test_forget_drops_inodes(dispatcher: Dispatcher) -> None:

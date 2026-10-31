@@ -268,13 +268,22 @@ class Dispatcher:
 
         try:
             result = await run_pipeline(ctx, run)
+            final = result[0] if isinstance(result, tuple) else result
+            if not isinstance(final, Opened):
+                log.error("%s: a post hook returned %s, not Opened", op, type(final).__name__)
+                raise FsError(errno.EIO, "post hook returned no Opened")
         except FsError:
             # The operation opened something but a post hook failed: the kernel never gets a
             # handle to release, so close it here.
             for o in opened:
                 await self._release(impl, o, dir_=op == "opendir")
             raise
-        final = result[0] if isinstance(result, tuple) else result
+        # A post hook may replace the result (virtual content, say): the kernel releases only
+        # the replacement, so close an fd it dropped. An fd-less original can't be told apart
+        # from a copy of it, so it isn't released: releasing it twice is worse.
+        for o in opened:
+            if o.fd is not None and o.fd != final.fd:
+                await self._release(impl, o, dir_=op == "opendir")
         handle = Handle(res, 0, impl, final, ctx.caller)
         return result, handle
 
