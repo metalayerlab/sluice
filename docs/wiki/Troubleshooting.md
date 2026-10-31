@@ -52,6 +52,10 @@ A param registered with `secret=True` is used where it would end up in a real pa
 
 A number setting (`mount.cache_ms`, `pipeline.slow_ms`, `io.threads`) holds something that isn't a whole number: a decimal, `true`/`false`, or a list. sluice refuses it rather than round it, since `0.5` would quietly become `0`. Write a whole number, e.g. `cache_ms: 500`. Environment variables are strings, so `SLUICE_MOUNT_CACHE_MS=500` works.
 
+### `error: mount.point: expected str, got ['a']` (or another text setting)
+
+A text setting holds a YAML list or mapping. sluice refuses it rather than use its Python text (`['a']`) as the value. Write a single value, e.g. `point: /mnt/data`. `env.expose` is a comma-separated string too: `expose: HOME,USER`, not a list.
+
 ### `error: env.expose: not set in the environment: NAME`
 
 A variable in the `env.expose` allowlist isn't set in sluice's environment. Set it, or remove it from the list. Every exposed name must exist, because backend templates are rendered with it.
