@@ -364,6 +364,41 @@ def test_post_replacing_opened_closes_the_dropped_handle(backing: Path) -> None:
     assert len(closed) == 3 and isinstance(closed[2], int)
 
 
+def test_replacement_opened_serves_its_data_on_a_backed_route(backing: Path) -> None:
+    class Serve(Middleware):
+        ops = frozenset({"open"})
+
+        async def pre(self, ctx: Context) -> None:
+            if ctx.path.name == "p.txt":
+                ctx.respond(Opened(data=b"from pre"))
+
+        async def post(self, ctx: Context, result: Any) -> Any:
+            return Opened(data=b"from post") if ctx.path.name == "notes.txt" else result
+
+    app = Sluice()
+    app.route("/b", backend=str(backing), middlewares=[Serve()])
+    io = Passthrough(1)
+    d = Dispatcher(app.freeze(), io)
+
+    async def go(path: str) -> bytes:
+        info = await d.open(await walk(d, path), os.O_RDWR)
+        try:
+            data = await d.read(info.fh, 5, 4) + await d.read(info.fh, 0, 5)
+            await d.fsync(info.fh, datasync=False)
+            await d.fsync(info.fh, datasync=True)
+            with pytest.raises(FsError) as e:
+                await d.write(info.fh, 0, b"x")
+            assert e.value.errno == errno.EROFS
+            return data
+        finally:
+            await d.release(info.fh)
+
+    assert run(go("/b/alice/notes.txt")) == b"postfrom "
+    assert run(go("/b/alice/private/p.txt")) == b"prefrom "
+    io.shutdown()
+    assert (backing / "alice" / "notes.txt").read_bytes() == b"hello SECRET world"
+
+
 def test_post_replacing_opened_without_fd_or_with_junk(backing: Path) -> None:
     released: list[int | None] = []
 

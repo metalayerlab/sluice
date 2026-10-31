@@ -56,6 +56,10 @@ A variable in the `env.expose` allowlist isn't set in sluice's environment. Set 
 
 A middleware, `param()` callback or virtual handler raised something other than `FsError` or `Deny`. sluice logs it at ERROR, with a traceback and the call's correlation id (`[1f]`), and returns `EIO`. A `post` hook that raises always gives `EIO`: it fails closed.
 
+### Reads of a file a hook serves return `Input/output error`
+
+sluice 0.1.1 and earlier: on a backed route, a `post` hook (or a `pre` hook via `ctx.respond`) that replaces `open`'s result with `Opened(data=...)` makes every `read` and `fsync` of that file fail with `EIO`; the log shows a `TypeError` from `os.pread` or `os.fsync`. Upgrade. Since the fix the file reads as the hook's data, and writes fail with `EROFS` (`Read-only file system`), as on a virtual route. Return `Opened(data=..., direct_io=True)`, as virtual routes do: otherwise the kernel trusts the backing file's size and can cut the data short or cache it. Until you upgrade, serve the content from a `virtual=True` route instead.
+
 ### `Permission denied` on everything below a path
 
 A `pre` hook or `param()` callback denied the call (`auth()` with a `verify` that returned False, or a `Deny`). The access log shows the op and path that got `EACCES`. `sluice resolve <path> --op <op>` lists the middleware that runs there.
