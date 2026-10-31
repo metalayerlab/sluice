@@ -60,7 +60,7 @@ flowchart LR
 | 5 levels | 22–24% | up to 29% |
 | 15 levels | 30–38% | up to 48% |
 
-The ranges span `stat`, `open`+`read`, `readdir`, and an `os.walk` + `lstat` of a tree (as `find` or `ls -lR` do). With `cache_ms=0` a `stat` of a deep path looks up every component, each walking its own depth, so deep trees pay the most. Cached `stat`s never reach sluice, so they pay nothing. A single-syscall `openat2(RESOLVE_BENEATH)` or cached directory fds could remove at most that share; the rest is the per-call FUSE and pipeline cost.
+The ranges span `stat`, `open`+`read`, `readdir`, and an `os.walk` + `lstat` of a tree (as `find` or `ls -lR` do). With `cache_ms=0` a `stat` of a deep path looks up every component, each walking its own depth, so deep trees pay the most. Cached `stat`s never reach sluice, so they pay nothing. A single-syscall `openat2(RESOLVE_BENEATH)` or cached directory fds could remove at most that share; the rest is the per-call FUSE and pipeline cost. To measure it again, see [Testing Guide](Testing-Guide#benchmarks).
 
 **Failure.** Every failure becomes one errno for one call, and the mount carries on:
 

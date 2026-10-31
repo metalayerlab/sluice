@@ -49,6 +49,7 @@ T = template-owned: never edit here; fixes arrive by the weekly update PR. Bug i
 |---|---|
 | `src/sluice/` | The package: `config.py`, `cli.py` (Typer); routing, middleware, dispatch (no pyfuse3); `fs.py`, `mount.py` (the only pyfuse3 users) |
 | `tests/unit/`, `tests/integration/` | pytest; integration is marked and opt-in |
+| `benchmarks/` | Manual benchmarks; not run by pytest or CI |
 | `docs/wiki/` | The wiki (published from `main`); `.standard.toml` = required pages (T) |
 | `docs/design/` | Design records; `README.md` is the index |
 | `docs/ai/` | Prompts, review checklist (T) |
