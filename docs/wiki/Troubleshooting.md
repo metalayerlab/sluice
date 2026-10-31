@@ -44,6 +44,10 @@ The module isn't on `sys.path`, or importing it raised the error shown. Set `app
 
 The routes don't validate. The message names the route and the problem. Fix the app, and use `sluice routes` to check it without mounting. The full list of checks is in [Writing an App](Writing-an-App#what-freeze-checks).
 
+### `error: /files/{token}: backend can't use the secret param {token}`
+
+A param registered with `secret=True` is used where it would end up in a real path, which sluice logs, shows in `sluice resolve` and passes to `auth`'s `verify`. Either the route's own `backend` template uses it, or the route has no backend of its own, inherits one from an ancestor, and captures it (its segments are appended to the real path). Capture the secret on the backed route itself, or above it: `app.route("/files/{token}", backend="/srv/files")` keeps the token out of the real path. sluice 0.1.1 and earlier accepted the inherited case and leaked the value.
+
 ### `error: mount.cache_ms: expected int, got 0.5` (or another number setting)
 
 A number setting (`mount.cache_ms`, `pipeline.slow_ms`, `io.threads`) holds something that isn't a whole number: a decimal, `true`/`false`, or a list. sluice refuses it rather than round it, since `0.5` would quietly become `0`. Write a whole number, e.g. `cache_ms: 500`. Environment variables are strings, so `SLUICE_MOUNT_CACHE_MS=500` works.

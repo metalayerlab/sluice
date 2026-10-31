@@ -398,7 +398,7 @@ def compile_table(
         if spec.func is not None:
             check_coroutine(spec.func, f"param({spec.name!r})")
 
-    def build(route: Route, captured: frozenset[str]) -> Node:
+    def build(route: Route, captured: frozenset[str], backed: bool) -> Node:
         where = route.full_pattern
         own = [s.text for s in route.segments if s.kind is not Kind.LITERAL]
         for name in own:
@@ -421,7 +421,13 @@ def compile_table(
                     raise RouteError(f"{where}: backend uses {{{name}}}, which no route captures")
                 if name in secret:
                     raise RouteError(f"{where}: backend can't use the secret param {{{name}}}")
-        children = tuple(build(c, captured) for c in route.children)
+        elif backed and not route.virtual:
+            # Below an inherited backend, this route's segments are appended to the real path.
+            for name in own:
+                if name in secret:
+                    raise RouteError(f"{where}: backend can't use the secret param {{{name}}}")
+        backed = not route.virtual and (backed or template is not None)
+        children = tuple(build(c, captured, backed) for c in route.children)
         shapes: dict[tuple[tuple[Kind, str], ...], Route] = {}
         for child in children:
             shape = tuple(
@@ -442,4 +448,4 @@ def compile_table(
             direct_io=route.direct_io,
         )
 
-    return RouteTable(build(root, frozenset()), params, config)
+    return RouteTable(build(root, frozenset(), False), params, config)
