@@ -51,10 +51,12 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "S", "T20"]
 # assert is how pytest checks; scripts print, and run git, by design.
 "tests/*" = ["S101"]
 "scripts/*" = ["T20", "S603", "S607"]
+# benchmarks print their results and start the mount daemon.
+"benchmarks/*" = ["T20", "S603"]
 
 [tool.mypy]
 strict = true
-files = ["src/sluice", "tests", "scripts"]
+files = ["src/sluice", "tests", "scripts", "benchmarks"]
 
 [[tool.mypy.overrides]]
 # pyfuse3 is the optional `fuse` extra (design 0001, question 10): CI installs without it, and

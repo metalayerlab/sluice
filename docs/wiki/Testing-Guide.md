@@ -25,6 +25,18 @@ CI runs the unit tests on every supported Python version, together with ruff, my
 
 CI has no libfuse, so it runs only the unit tests, and `fs.py` (the pyfuse3 adapter) shows as uncovered there. Run the integration tests before a PR that touches `fs.py`, `mount.py` or the dispatcher.
 
+## Benchmarks
+
+`benchmarks/` holds scripts you run by hand when a change may cost speed. They are linted and type-checked with the rest, but pytest and CI never run them.
+
+`benchmarks/bench_walk.py` compares the symlink-safe backend walk with the plain calls it replaced, in the backend alone and through a real mount (results in [Architecture Internals](Architecture-Internals#data-flow)). It needs FUSE and the code from before the walk:
+
+```sh
+uv sync --extra fuse
+git worktree add ../sluice-old 3327997^
+uv run benchmarks/bench_walk.py src ../sluice-old/src /tmp/bench  # a tmpfs work dir
+```
+
 ## Writing tests
 
 - Every behaviour change needs a test that fails without it. A bug fix starts with the failing test.
