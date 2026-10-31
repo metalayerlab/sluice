@@ -364,6 +364,43 @@ def test_post_replacing_opened_closes_the_dropped_handle(backing: Path) -> None:
     assert len(closed) == 3 and isinstance(closed[2], int)
 
 
+def test_post_replacing_opened_without_fd_or_with_junk(backing: Path) -> None:
+    released: list[int | None] = []
+
+    class Tweak(Middleware):
+        ops = frozenset({"open"})
+
+        async def post(self, ctx: Context, result: Any) -> Any:
+            return None if ctx.path.name == "notes.txt" else replace(result, keep_cache=True)
+
+    class Counted(Status):
+        async def release(self, handle: Opened) -> None:
+            released.append(handle.fd)
+
+    class Io(Passthrough):
+        async def release(self, handle: Any) -> None:
+            released.append(handle.fd)
+            await super().release(handle)
+
+    app = Sluice()
+    app.route("/b", backend=str(backing), middlewares=[Tweak()])
+    app.route("/v/{user}", virtual=True, handler=Counted(), middlewares=[Tweak()])
+    io = Io(1)
+    d = Dispatcher(app.freeze(), io)
+    notes = run(walk(d, "/b/alice/notes.txt"))
+    assert errno_of(lambda: d.open(notes, os.O_RDONLY)) == errno.EIO
+    assert len(released) == 1 and isinstance(released[0], int)  # the fd is closed
+
+    async def go() -> None:
+        info = await d.open(await walk(d, "/v/alice"), os.O_RDONLY)
+        assert info.keep_cache and len(released) == 1  # the copy isn't released early
+        await d.release(info.fh)
+
+    run(go())
+    io.shutdown()
+    assert released[1:] == [None]  # released once, by the kernel
+
+
 def test_forget_drops_inodes(dispatcher: Dispatcher) -> None:
     inode = run(walk(dispatcher, "/fuse"))
     before = len(dispatcher.inodes)
