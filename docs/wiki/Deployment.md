@@ -62,4 +62,4 @@ docker run --rm \
 
 ## Building the image
 
-pyfuse3 ships only as source, so the builder stage installs `gcc`, `libc6-dev`, `libfuse3-dev` and `pkg-config` and syncs with `--extra fuse`. The runtime stage installs `fuse3`. The packages are listed in `contrib/system-packages.txt` (`build:` and `runtime:`); CI's test job installs the `build:` ones too.
+pyfuse3 ships only as source, so the builder stage installs `gcc`, `libc6-dev`, `libfuse3-dev` and `pkg-config` and syncs with `--extra fuse`. The runtime stage installs `fuse3`. The packages are listed in `contrib/system-packages.txt` (`build:` and `runtime:`); CI's test job installs the `build:` ones too. The `--extra fuse` is a local edit to the template-owned Dockerfile until the template can name extras ([project-template#63](https://github.com/metalayerlab/project-template/issues/63)).
