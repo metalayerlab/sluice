@@ -151,6 +151,9 @@ def _coerce(setting: Setting, raw: Any) -> Value:
                 return False
             raise ValueError(raw)
         if isinstance(setting.default, int):
+            # int() would truncate a YAML float (0.5 -> 0) and take a bool as 0/1.
+            if isinstance(raw, bool) or not isinstance(raw, int | str):
+                raise ValueError(raw)
             return int(raw)
     except ValueError:
         kind = type(setting.default).__name__
