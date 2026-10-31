@@ -153,6 +153,7 @@ async def run_pipeline(
     `also` are contexts for a second path (rename's target): before the operation, their
     `param()` callbacks and their whole chain's `pre` hooks run too, with that context. A
     middleware on both chains runs once per path, so `auth()` checks the target as well.
+    A `ctx.respond()` on either side stops the remaining `pre` hooks and skips the operation.
     Every hook that ran `pre` gets `post` or `failed` with the same context.
     """
     chain = [mw for mw in ctx.resolution.middlewares if mw.applies(ctx.op)]
@@ -166,17 +167,23 @@ async def run_pipeline(
             await mw.pre(ctx)
             if ctx.responded:
                 break
-        if not ctx.responded:
-            for other in also:
-                await run_params(other, other.resolution.param_specs)
-                for mw in other.resolution.middlewares:
-                    if mw.applies(other.op):
-                        ran.append((mw, other))
-                        await mw.pre(other)
+        responder = ctx if ctx.responded else None
+        for other in also:
+            if responder is not None:
+                break
+            await run_params(other, other.resolution.param_specs)
+            for mw in other.resolution.middlewares:
+                if mw.applies(other.op):
+                    ran.append((mw, other))
+                    await mw.pre(other)
+                    if other.responded:
+                        responder = other
+                        break
+        if responder is None:
             stage = "operation"
             result = await operation(ctx)
         else:
-            result = ctx.response
+            result = responder.response
         stage = "post"
         for mw, mw_ctx in reversed(ran):
             result = await mw.post(mw_ctx, result)

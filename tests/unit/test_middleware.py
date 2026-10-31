@@ -241,6 +241,26 @@ def test_also_target_middleware_observes_a_failed_operation() -> None:
     ]
 
 
+def test_also_target_respond_short_circuits_the_operation() -> None:
+    log: list[str] = []
+
+    class Answer(PathRecorder):
+        async def pre(self, ctx: Context) -> None:
+            await super().pre(ctx)
+            ctx.respond("answered")
+
+    app = Sluice()
+    app.route("/a", backend="/a", middlewares=[PathRecorder("src", log)])
+    app.route("/b", backend="/b", middlewares=[Answer("dst", log), PathRecorder("late", log)])
+    src, dst = rename_contexts(app.freeze(), "/a/f", "/b/f")
+
+    async def op(ctx: Context) -> None:
+        log.append("op")
+
+    assert run(src, op, also=[dst]) == "answered"
+    assert log == ["pre:src:/a/f", "pre:dst:/b/f", "post:dst:/b/f", "post:src:/a/f"]
+
+
 def test_rename_within_one_route_is_authorised_against_the_target() -> None:
     seen: list[str] = []
 
