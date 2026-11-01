@@ -1,6 +1,6 @@
 # 0002: Middleware lives in examples/; strmfs and ShadowFS on sluice
 
-Status: Approved
+Status: Implemented
 Date: 2026-10-31 (revised 2026-11-01)
 Authors: Stephen Cox; drafted by Claude
 Supersedes: the built-ins part of [0001](0001-initial-design.md) (`auth()`, `access_log()` in `middleware.py`)
@@ -161,3 +161,18 @@ raw bytes for transformed ones.
 3. **`ctx.backend.lstat` vs a following `stat`.** strmfs libraries often symlink videos. Recommend
    `stat(path)` that follows links only while they stay beneath the prefix, plus `lstat`; `Strm` uses
    `stat`.
+
+## Implementation notes
+
+Shipped in the recommended order: #39 (gaps A and B), #41 (`auth`/`access_log` to `examples/`), #42 (`strm.py`),
+#43 (`hide.py`), #44 (`layers.py`), #45 (`transform.py`); plus #40, a fix found on the way (a backend whose literal
+prefix is itself a symlink showed as a symlink at the route root). Where the code differs from the text above:
+
+- Question 3: `ctx.backend.stat` follows a final symlink only while its target stays inside the **rendered backend
+  root**, not the literal prefix, so `/ext4/{user}` hooks for alice can't stat bob's files through a link.
+- Gap B: an `OSError` keeps its errno only if it is a kernel errno; `socket.gaierror`, `ssl.SSLError` and unknown
+  numbers stay `EIO` and are logged.
+- Layers: sluice has no mount-lifecycle hook, so the index is built on first use and rebuilt in the background once
+  older than `refresh`, rather than at mount and on a timer. Names two files share in a view carry their source
+  directory (`project@docs.py`).
+- `Strm` answers `.strm` calls with `ctx.respond()`, so it must follow any authorisation middleware on its route.
