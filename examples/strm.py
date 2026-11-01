@@ -65,7 +65,7 @@ class Strm(Middleware):
         return PurePosixPath(name).suffix.lower() in self.video
 
     async def pre(self, ctx: Context) -> None:
-        if ctx.op in _WRITES or (ctx.op == "open" and ctx.args.flags & os.O_ACCMODE):
+        if ctx.op in _WRITES or (ctx.op == "open" and ctx.args.flags & (os.O_ACCMODE | os.O_TRUNC)):
             raise FsError(errno.EROFS, "strm mounts are read-only")
         if ctx.op == "access" and ctx.args.mode & os.W_OK:
             ctx.respond(False)  # Every write would be EROFS

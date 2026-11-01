@@ -81,6 +81,7 @@ def test_is_read_only(d: Dispatcher) -> None:
     films = run(walk(d, "/media/Films"))
     assert errno_of(d.open(strm, os.O_WRONLY)) == errno.EROFS
     assert errno_of(d.open(strm, os.O_RDWR)) == errno.EROFS
+    assert errno_of(d.open(strm, os.O_RDONLY | os.O_TRUNC)) == errno.EROFS
     assert errno_of(d.mkdir(films, "new", 0o755)) == errno.EROFS
     assert errno_of(d.unlink(films, "Heat.mkv.strm")) == errno.EROFS
     assert errno_of(d.create(films, "x.mkv.strm", 0o644, os.O_WRONLY)) == errno.EROFS
