@@ -6,6 +6,7 @@ the team (and its AI assistants) should know at a glance.
 ## Open
 
 - [ ] Delete `.github/workflows/integration.yml` (a workaround) when the template's integration job lands (metalayerlab/project-template#81)
+- [ ] Link Troubleshooting's `auth()` import entry to the FAQ anchor `#where-did-auth-and-access_log-go` when `check-wiki.py` keeps inline code in heading anchors (metalayerlab/project-template#83)
 
 ## Decided against (don't re-propose without reading this first)
 
