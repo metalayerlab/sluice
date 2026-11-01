@@ -59,11 +59,11 @@ def _beneath(prefix: Path, real: Path) -> Iterator[At]:
         names = real.relative_to(prefix).parts
     except ValueError:
         raise FsError(errno.EACCES, "path escapes its backend") from None
-    top = prefix
     if not names:
-        # The backend itself: its own name is the final component, as in lstat(prefix).
-        top, names = prefix.parent, (prefix.name or ".",)
-    fd = os.open(top, os.O_PATH | os.O_DIRECTORY | os.O_CLOEXEC)
+        # The backend itself: the admin's path, followed if it is a link, so the route shows
+        # the directory it names. Ops act on "." in it.
+        names = (".",)
+    fd = os.open(prefix, os.O_PATH | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
         for name in names[:-1]:
             parent = fd

@@ -165,3 +165,18 @@ def test_scandir_lists_with_lstat_attributes(dispatcher: Dispatcher, capture: Ca
     assert {"a.txt", "sub", "inside"} <= entries.keys()
     assert entries["a.txt"].st_size == 5
     assert stat.S_ISLNK(entries["inside"].st_mode)
+
+
+def test_a_symlinked_root_is_followed(tmp_path: Path, capture: Capture) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "real" / "f").write_bytes(b"f")
+    (tmp_path / "link").symlink_to("real")
+    app = Sluice()
+    app.route("/u/{user}", backend=str(tmp_path / "link"), middlewares=[capture])
+    io = Passthrough(1)
+    try:
+        d = Dispatcher(app.freeze(), io)
+        assert stat.S_ISDIR(run(d, capture, lambda b: b.stat(".")).st_mode)
+        assert [e.name for e in run(d, capture, lambda b: b.scandir("."))] == ["f"]
+    finally:
+        io.shutdown()

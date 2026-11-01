@@ -702,3 +702,28 @@ def test_follows_a_symlinked_backend_prefix(tmp_path: Path) -> None:
         assert run(cat(d, "/u/alice/f")) == b"f"
     finally:
         io.shutdown()
+
+
+def test_a_symlinked_backend_root_shows_the_directory(tmp_path: Path) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "real" / "f").write_text("f", encoding="utf-8")
+    (tmp_path / "link").symlink_to("real")
+    app = Sluice()
+    app.route("/b", backend=str(tmp_path / "link"))
+    io = Passthrough(1)
+    d = Dispatcher(app.freeze(), io)
+
+    async def listing() -> tuple[int, list[str]]:
+        entry = await d.lookup(ROOT_INODE, "b")
+        fh = await d.opendir(entry.inode)
+        names = [e.name for e in await d.readdir(fh)]
+        await d.releasedir(fh)
+        return entry.attr.st_mode, names
+
+    try:
+        mode, names = run(listing())
+        assert stat.S_ISDIR(mode)
+        assert names == ["f"]
+        assert run(cat(d, "/b/f")) == b"f"
+    finally:
+        io.shutdown()
