@@ -5,7 +5,6 @@ the team (and its AI assistants) should know at a glance.
 
 ## Open
 
-- [ ] Verify the container recipe in the wiki's Deployment page (image build and a mount inside Docker), then remove its `TODO(wiki)` marker (a Release PR is blocked until then)
 - [ ] Add an integration job to CI (`uv sync --extra fuse`; libfuse3 now comes from `contrib/system-packages.txt`); design 0001, question 10
 
 ## Decided against (don't re-propose without reading this first)
