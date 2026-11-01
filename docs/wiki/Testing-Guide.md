@@ -23,7 +23,7 @@ CI runs the unit tests on every supported Python version, together with ruff, my
 | `tests/unit/test_inodes.py`, `test_app.py`, `test_mount.py`, `test_cli.py` | The inode table; app loading, `MountConfig` and secrets, virtual handler defaults; mount-point checks and signal handling; the commands |
 | `tests/integration/test_mount.py` | `sluice mount` in a subprocess, used through the kernel; fails if the daemon logs a traceback or a token |
 
-CI has no libfuse, so it runs only the unit tests, and `fs.py` (the pyfuse3 adapter) shows as uncovered there. Run the integration tests before a PR that touches `fs.py`, `mount.py` or the dispatcher.
+CI's Test job runs the unit tests only, so `fs.py` (the pyfuse3 adapter) shows as uncovered there. The Integration job (`.github/workflows/integration.yml`) installs libfuse3 and the `fuse` extra and runs the whole suite with `RUN_INTEGRATION=1`; it fails rather than skips if `/dev/fuse`, `fusermount3` or pyfuse3 is missing.
 
 ## Benchmarks
 
