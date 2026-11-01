@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.2](https://github.com/metalayerlab/sluice/compare/v0.1.1...v0.1.2) (2026-10-31)
+
+
+### 🐛 Bug Fixes
+
+* ignore a stop signal that arrives after the event loop closes ([#15](https://github.com/metalayerlab/sluice/issues/15)) ([63343a9](https://github.com/metalayerlab/sluice/commit/63343a90096657a71c2baaca3bbacbbe50ad1f41))
+* let a target-side ctx.respond() short-circuit a rename ([#29](https://github.com/metalayerlab/sluice/issues/29)) ([ebad628](https://github.com/metalayerlab/sluice/commit/ebad6287c8cee279ada18643f02ab6a6ea58297b))
+* let rename's target chain observe a target param() failure ([#31](https://github.com/metalayerlab/sluice/issues/31)) ([59199bc](https://github.com/metalayerlab/sluice/commit/59199bc8df4a94d44d64a49b24bb9f5cd0082efe))
+* never follow symlinks out of a backend directory ([#24](https://github.com/metalayerlab/sluice/issues/24)) ([3327997](https://github.com/metalayerlab/sluice/commit/3327997236ac45f5bc10b09c877d13513e9eabcc))
+* refuse secret params in inherited backend paths ([#23](https://github.com/metalayerlab/sluice/issues/23)) ([5aa2475](https://github.com/metalayerlab/sluice/commit/5aa2475e1940822f404c90add67223d586915bbd))
+* reject floats and bools for number settings ([#20](https://github.com/metalayerlab/sluice/issues/20)) ([3d79d47](https://github.com/metalayerlab/sluice/commit/3d79d47967b0e7084afcddb30ff09bbb2e2878a3)), closes [#19](https://github.com/metalayerlab/sluice/issues/19)
+* reject lists and mappings for text settings ([#30](https://github.com/metalayerlab/sluice/issues/30)) ([e4a8b7a](https://github.com/metalayerlab/sluice/commit/e4a8b7a9d426aab758409c670811551d440841fa))
+* run shared middleware against rename's target too ([#22](https://github.com/metalayerlab/sluice/issues/22)) ([5f288fe](https://github.com/metalayerlab/sluice/commit/5f288fe8ad57bee1a427df7bba5a7daecce71ecb))
+* serve reads from a hook's replacement open result ([#21](https://github.com/metalayerlab/sluice/issues/21)) ([a6bdf4a](https://github.com/metalayerlab/sluice/commit/a6bdf4a927155ea7a915d6372160ebb7f37988f2))
+
+
+### 📚 Documentation
+
+* record what the nofollow backend walk costs ([#32](https://github.com/metalayerlab/sluice/issues/32)) ([b094cf8](https://github.com/metalayerlab/sluice/commit/b094cf804300bc0505cefb105b8d8a8777571855))
+
 ## [0.1.1](https://github.com/metalayerlab/sluice/compare/v0.1.0...v0.1.1) (2026-10-31)
 
 

@@ -1,7 +1,7 @@
 [project]
 name = "sluice"
 # Owned by release-please: never edit by hand (see the wiki's Release-Process page).
-version = "0.1.1"
+version = "0.1.2"
 description = "Sluice — a Python FUSE filesystem with an Express-style router that gates, rewrites, and middleware-intercepts every filesystem call between virtual paths and their backing stores."
 readme = "README.md"
 requires-python = ">=3.13"
