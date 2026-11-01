@@ -19,6 +19,10 @@ Four possible reasons, most likely first:
 
 They moved out of the package into the repository's `examples/` directory (design 0002): sluice ships the mechanism, and every policy is code you own. Copy `examples/auth.py` and `examples/access_log.py` beside your app module, and change the import to `from auth import auth` and `from access_log import access_log`. Their behaviour and `repr` are unchanged. See [Writing an App](Writing-an-App#example-middleware).
 
+## Can sluice serve `.strm` files for Kodi or Jellyfin, like fuse-strmfs?
+
+Yes, with `examples/strm.py`. Copy it beside your app, then add `app.route("/media", backend="/srv/media", middlewares=[Strm("http://media.example.org/{rel}")])`. Each video shows up as `<name>.strm`, holding its URL. Unlike strmfs, you can have several sources under one mount, an `{env.*}` backend, and the other middleware on the same route (put `Strm` after any authorisation middleware: it answers `.strm` calls itself). See [Writing an App](Writing-an-App#example-middleware).
+
 ## Is the `auth()` middleware secure?
 
 Not by itself. The example `auth()` allows everything until you give it a `verify` function, and sluice reaches the backing store with its own uid for every caller. Write `verify` yourself, keep `mount.allow_other` off unless you need it, and read [Security](Security).
