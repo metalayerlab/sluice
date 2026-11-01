@@ -126,6 +126,7 @@ sluice ships no concrete middleware: the package is the mechanism, and every pol
 |---|---|
 | `auth.py`: `auth(verify, user_param="user", token_param="token")` | Denies the call unless `await verify(user, token, real_path, op)` returns True. The default `verify` allows everything: phase 1 provides the hook, not the policy. |
 | `access_log.py`: `access_log(logger=None, level=logging.INFO)` | Logs one line per call to `sluice.access`: op, `display_path` (secret segments masked), caller uid and pid, outcome (`ok` or the errno name), time, correlation id. |
+| `strm.py`: `Strm(template, video=VIDEO)` | strmfs as middleware: shows each video `X.mkv` as `X.mkv.strm`, a read-only file whose content is `template` filled in (`{rel}`, the URL-quoted path below the backend; `{name}`, the file name) plus a newline. Kodi and Jellyfin play a `.strm` as "play this location". Directories pass through, other files are hidden from listings and lookups, and the mount is read-only (`EROFS`). A symlinked video counts while its target stays in the backend. All its I/O is `ctx.backend`. Put it after any authorisation middleware: it answers `.strm` lookups and opens itself, which skips the `pre` hooks after it |
 
 ### The context
 
