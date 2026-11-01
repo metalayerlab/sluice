@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from sluice.config import Config, ConfigError
 
 if TYPE_CHECKING:
+    from sluice.backend import BackendView
     from sluice.routing import Resolution, Route
 
 MASK = "********"
@@ -275,6 +276,7 @@ class Context:
         args: Any = None,
         caller: Caller | None = None,
         correlation_id: str = "0",
+        backend: BackendView | None = None,
     ) -> None:
         self._op = op
         self._resolution = resolution
@@ -282,6 +284,7 @@ class Context:
         self._inode = inode
         self._caller = caller or Caller(os.getuid(), os.getgid(), os.getpid())
         self._correlation_id = correlation_id
+        self._backend = backend
         self._timestamp = time.time()
         self.args: Any = NoArgs() if args is None else args
         self.params: dict[str, Any] = dict(resolution.params)
@@ -321,6 +324,11 @@ class Context:
     @property
     def route(self) -> Route:
         return self._resolution.route
+
+    @property
+    def backend(self) -> BackendView | None:
+        """Read-only, symlink-safe access to the route's backend; `None` on virtual routes."""
+        return self._backend
 
     @property
     def caller(self) -> Caller:

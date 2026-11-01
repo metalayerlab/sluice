@@ -29,6 +29,7 @@ _OPEN_IGNORED = os.O_CREAT | os.O_EXCL | os.O_NOCTTY
 _WALK = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _libc = ctypes.CDLL(None, use_errno=True)
 _renameat2 = getattr(_libc, "renameat2", None)
+_SYMLOOP_MAX = 40  # Linux's limit on links followed in one lookup
 
 type At = tuple[int, str]  # A directory fd and a name in it
 
@@ -202,6 +203,48 @@ def _scandir(at: At) -> list[DirEntry]:
     return entries
 
 
+def _stat_within(prefix: Path, root: Path, real: Path) -> os.stat_result:
+    """`stat` that follows a final symlink only while its target stays inside `root`.
+
+    Each hop is walked afresh beneath `prefix`, so a link in a directory component is never
+    followed: the target is resolved lexically, as the walk sees it.
+    """
+    for _ in range(_SYMLOOP_MAX):
+        with _beneath(prefix, real) as at:
+            st = _lstat(at)
+            if not stat.S_ISLNK(st.st_mode):
+                return st
+            target = _readlink(at)
+        real = Path(os.path.normpath(real.parent / target))
+        if not real.is_relative_to(root):
+            raise FsError(errno.EACCES, "symlink leaves its backend")
+    raise FsError(errno.ELOOP, "too many symlinks")
+
+
+def _read_all(at: At, limit: int) -> bytes:
+    # O_NONBLOCK: a FIFO swapped in for a file must not hang a pool thread.
+    fd = _open(at, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        st = os.fstat(fd)
+        if stat.S_ISDIR(st.st_mode):
+            raise FsError(errno.EISDIR, "is a directory")
+        if not stat.S_ISREG(st.st_mode):
+            raise FsError(errno.EINVAL, "not a regular file")
+        if st.st_size > limit:
+            raise FsError(errno.EFBIG, f"larger than {limit} bytes")
+        chunks: list[bytes] = []
+        size = 0
+        # The file may grow after fstat: read to EOF, but never past the limit.
+        while chunk := os.read(fd, min(1 << 20, limit + 1 - size)):
+            chunks.append(chunk)
+            size += len(chunk)
+            if size > limit:
+                raise FsError(errno.EFBIG, f"larger than {limit} bytes")
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
 def _xattr[T](fn: Callable[..., T]) -> Callable[..., T]:
     """Run an `os.*xattr` on a name: there's no *at form, so through the parent's /proc fd link."""
 
@@ -345,3 +388,67 @@ class Passthrough:
 
     async def removexattr(self, ctx: Context) -> None:
         await self.at(_xattr(os.removexattr), ctx.resolution, ctx.args.name)
+
+
+def _fs_errors[T](fn: Callable[..., T]) -> Callable[..., T]:
+    """Raise `OSError` as `FsError` with its errno, as `ctx.backend` promises."""
+
+    def wrapper(*args: Any) -> T:
+        try:
+            return fn(*args)
+        except FsError:
+            raise
+        except OSError as e:
+            raise FsError(e.errno or errno.EIO, e.strerror or "") from e
+
+    return wrapper
+
+
+class BackendView:
+    """`ctx.backend`: read-only access to a backed route's files, by `Passthrough`'s rule.
+
+    A path is a real path inside the resolution's backend root, absolute or relative to it.
+    Nothing below the template's literal prefix is followed, except a final symlink by `stat`
+    while its target stays inside the root. Calls run in the I/O pool and raise `FsError` with
+    the real errno: `EACCES` for a path outside the root.
+    """
+
+    def __init__(self, io: Passthrough, res: Resolution) -> None:
+        prefix, root = res.backend_prefix, res.backend_root
+        if prefix is None or root is None:
+            raise ValueError("BackendView needs a backed resolution")
+        self._io = io
+        self._prefix = prefix
+        self._root = root
+
+    @property
+    def root(self) -> Path:
+        """The rendered backend: where this route's files live."""
+        return self._root
+
+    def _inside(self, path: Path | str) -> Path:
+        real = self._root / path
+        if ".." in real.parts or not real.is_relative_to(self._root):
+            raise FsError(errno.EACCES, "path outside the backend")
+        return real
+
+    async def _at[T](self, fn: Callable[..., T], path: Path | str, *args: Any) -> T:
+        return await self._io.run(_fs_errors(_at(fn)), self._prefix, self._inside(path), *args)
+
+    async def lstat(self, path: Path | str) -> Attr:
+        """The attributes of `path` itself, a symlink included."""
+        return Attr.from_stat(await self._at(_lstat, path))
+
+    async def stat(self, path: Path | str) -> Attr:
+        """The attributes of what `path` names, following symlinks that stay inside the root."""
+        real = self._inside(path)
+        st = await self._io.run(_fs_errors(_stat_within), self._prefix, self._root, real)
+        return Attr.from_stat(st)
+
+    async def read_all(self, path: Path | str, limit: int) -> bytes:
+        """A regular file's whole content; `EFBIG` if it holds more than `limit` bytes."""
+        return await self._at(_read_all, path, limit)
+
+    async def scandir(self, path: Path | str) -> list[DirEntry]:
+        """A directory's entries, with `lstat` attributes."""
+        return await self._at(_scandir, path)

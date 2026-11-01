@@ -1,6 +1,8 @@
 import asyncio
 import errno
 import logging
+import socket
+import ssl
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -100,6 +102,12 @@ class Boom(Probe):
         raise RuntimeError("bug")
 
 
+class Missing(Probe):
+    async def pre(self, ctx: Context) -> None:
+        await super().pre(ctx)
+        raise FileNotFoundError(errno.ENOENT, "a hook's own lookup")
+
+
 class Upper(Probe):
     async def post(self, ctx: Context, result: Any) -> Any:
         await super().post(ctx, result)
@@ -186,6 +194,12 @@ RULES = {
         lambda log: [Probe("a", log), Boom("x", log), Probe("b", log)],
         ["pre:a", "pre:x", "failed:EIO:x", "failed:EIO:a"],
         error=errno.EIO,
+        stops_in_pre=True,
+    ),
+    "oserror-from-pre-keeps-its-errno": Rule(
+        lambda log: [Probe("a", log), Missing("m", log), Probe("b", log)],
+        ["pre:a", "pre:m", "failed:ENOENT:m", "failed:ENOENT:a"],
+        error=errno.ENOENT,
         stops_in_pre=True,
     ),
     "fs-error-from-the-op-passes-through": Rule(
@@ -292,6 +306,27 @@ def test_unexpected_error_in_pre_is_eio_and_logged(caplog: pytest.LogCaptureFixt
     assert e.value.errno == errno.EIO
     assert "unexpected error in pre [c1]" in caplog.text
     assert "T0k" in caplog.text  # not a secret param here
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        socket.gaierror(socket.EAI_NONAME, "unknown host"),
+        ssl.SSLError(1, "certificate verify failed"),
+        OSError(99999, "not an errno"),
+    ],
+    ids=["gaierror", "sslerror", "unknown-errno"],
+)
+def test_library_oserrors_in_hooks_are_eio_and_logged(
+    error: OSError, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def hook(ctx: Context) -> None:
+        raise error
+
+    with pytest.raises(FsError) as e:
+        run(context(make(hook)))
+    assert e.value.errno == errno.EIO
+    assert "unexpected error in pre" in caplog.text
 
 
 def test_failed_hook_errors_are_ignored(caplog: pytest.LogCaptureFixture) -> None:
