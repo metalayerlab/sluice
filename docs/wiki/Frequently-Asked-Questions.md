@@ -23,6 +23,10 @@ They moved out of the package into the repository's `examples/` directory (desig
 
 Yes, with `examples/strm.py`. Copy it beside your app, then add `app.route("/media", backend="/srv/media", middlewares=[Strm("http://media.example.org/{rel}")])`. Each video shows up as `<name>.strm`, holding its URL. Unlike strmfs, you can have several sources under one mount, an `{env.*}` backend, and the other middleware on the same route (put `Strm` after any authorisation middleware: it answers `.strm` calls itself). See [Writing an App](Writing-an-App#example-middleware).
 
+## Can sluice show the same files by type, date or tag, like ShadowFS?
+
+Yes, with `examples/layers.py`. Add `app.route("/by-type/{rest*}", virtual=True, handler=Layer("/srv/project", "/src", by_type))` beside the backed route `/src`. Each view entry is a relative symlink back into `/src`, so reading it goes through `/src`'s middleware. For rules that hide files, see `examples/hide.py`. See [Writing an App](Writing-an-App#example-middleware).
+
 ## Is the `auth()` middleware secure?
 
 Not by itself. The example `auth()` allows everything until you give it a `verify` function, and sluice reaches the backing store with its own uid for every caller. Write `verify` yourself, keep `mount.allow_other` off unless you need it, and read [Security](Security).
