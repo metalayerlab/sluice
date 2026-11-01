@@ -8,6 +8,7 @@ middleware and virtual handlers, and serve it with `sluice mount`.
 from importlib.metadata import PackageNotFoundError, version
 
 from sluice.app import Sluice
+from sluice.backend import BackendView
 from sluice.context import Attr, Caller, Context, DirEntry, MountConfig, Opened, Secret
 from sluice.errors import Deny, FsError, RouteError
 from sluice.middleware import Middleware, access_log, auth
@@ -21,6 +22,7 @@ except PackageNotFoundError:  # pragma: no cover - a source tree that was never 
 
 __all__ = [
     "Attr",
+    "BackendView",
     "Caller",
     "Context",
     "Deny",

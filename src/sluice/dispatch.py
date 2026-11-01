@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
-from sluice.backend import Passthrough
+from sluice.backend import BackendView, Passthrough
 from sluice.context import (
     AccessArgs,
     Attr,
@@ -118,6 +118,7 @@ class Dispatcher:
             args=args,
             caller=caller,
             correlation_id=f"{next(self._ids):x}",
+            backend=BackendView(self.io, res) if res.backend_root is not None else None,
         )
 
     async def _call(

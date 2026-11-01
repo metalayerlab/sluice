@@ -100,6 +100,22 @@ A plain `async def fn(ctx)` passed as middleware is a `pre` hook.
 
 Middleware runs on the event loop that serves the whole mount. **Never block in a hook:** no `time.sleep`, no synchronous network or disk I/O. Use `await` and `asyncio.to_thread` instead. `pipeline.slow_ms` logs any step that holds the loop too long.
 
+An `OSError` raised in a hook fails the call with its own errno (a hook's `FileNotFoundError` is `ENOENT`). Any other unexpected exception is `EIO`, with its traceback logged, and so are OSErrors whose number isn't a kernel errno (`socket.gaierror`, `ssl.SSLError`).
+
+### Reading the backend from a hook
+
+On a backed route, `ctx.backend` is a read-only view of the route's backend; it is `None` on virtual routes and route-made directories. Use it instead of `os.stat` and `open`: its calls run in the I/O thread pool (no blocking the loop), and they reach files the way the passthrough does, never following a symlink below the template's literal prefix (see [Security](Security#hardening)).
+
+| | |
+|---|---|
+| `root` | The rendered backend (`/srv/media` for `backend="/srv/media"`) |
+| `await lstat(path)` | `Attr` of `path` itself, a symlink included |
+| `await stat(path)` | `Attr` of what `path` names: a final symlink is followed while its target stays inside `root` (`EACCES` if it leaves, `ELOOP` after 40 hops) |
+| `await read_all(path, limit)` | A regular file's content; `EFBIG` above `limit` bytes, `EISDIR` or `EINVAL` for anything but a regular file, `ELOOP` for a symlink |
+| `await scandir(path)` | A directory's `DirEntry` list, with `lstat` attributes |
+
+`path` is a real path inside `root`, absolute (`ctx.real_path.with_suffix("")`) or relative to `root`. A path outside `root`, or with a `..` component, is `EACCES`. Failures raise `FsError` with the real errno, so a hook can let them propagate.
+
 ### Built-in middleware
 
 | | |
@@ -115,6 +131,7 @@ Middleware runs on the event loop that serves the whole mount. **Never block in 
 | `args` | per-op dataclass | `ReadArgs(offset, size)`, `WriteArgs(offset, data)`, `OpenArgs(flags)`, ...; may be replaced in `pre` |
 | `params` | `dict` | Merged params of the whole chain, after `param()` callbacks |
 | `real_path` | `Path \| None` | `None` for virtual routes and route-made directories |
+| `backend` | `BackendView \| None` | Read-only, symlink-safe access to the backend ([above](#reading-the-backend-from-a-hook)); `None` when `real_path` is |
 | `virtual` | `bool` | |
 | `config` | `MountConfig` | `config.env` (str values) and `config.secret` (`Secret` values); read once at mount time |
 | `path`, `display_path`, `inode` | | The virtual path; `display_path` has secret segments masked; use it in logs |

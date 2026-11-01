@@ -10,6 +10,8 @@ from __future__ import annotations
 import errno
 import inspect
 import logging
+import socket
+import ssl
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
@@ -111,11 +113,26 @@ def as_middleware(obj: object, where: str) -> Middleware:
     raise RouteError(f"{where}: {obj!r} is not middleware")
 
 
+# OSErrors whose errno is a library's own code, not the kernel's: getaddrinfo's are negative,
+# and SSL_ERROR_SSL (1) would reach the caller as EPERM.
+_NOT_FS_ERRORS = (socket.gaierror, socket.herror, ssl.SSLError)
+
+
+def _fs_errno(e: Exception) -> int | None:
+    """The kernel errno an OSError carries: a real filesystem answer wherever it came from (a
+    hook's own I/O, say), so ENOENT from a hook doesn't surface as EIO."""
+    if not isinstance(e, OSError) or isinstance(e, _NOT_FS_ERRORS):
+        return None
+    code = e.errno
+    return code if isinstance(code, int) and code > 0 and code in errno.errorcode else None
+
+
 def _as_fs_error(ctx: Context, e: Exception, stage: str) -> FsError:
     if isinstance(e, FsError):
         return e
-    if stage == "operation" and isinstance(e, OSError) and e.errno:
-        return FsError(e.errno, e.strerror or "")
+    code = _fs_errno(e)
+    if code is not None:
+        return FsError(code, getattr(e, "strerror", None) or "")
     log.error(
         "%s %s: unexpected error in %s [%s]",
         ctx.op,
