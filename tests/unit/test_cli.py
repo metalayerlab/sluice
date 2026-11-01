@@ -61,7 +61,16 @@ def test_config_shows_every_setting(write_config: Callable[..., Path]) -> None:
 
 
 APP = """
-from sluice import Sluice, VirtualHandler, access_log, auth
+from sluice import Middleware, Sluice, VirtualHandler
+
+
+class Audit(Middleware):
+    pass
+
+
+class Gate(Middleware):
+    def __repr__(self):
+        return "gate(verify)"
 
 
 async def decode(ctx, raw):
@@ -69,9 +78,9 @@ async def decode(ctx, raw):
 
 
 app = Sluice()
-app.use(access_log())
+app.use(Audit())
 app.param("token", decode, secret=True)
-user = app.route("/fuse/{user}/{token}", backend="/ext4/{user}", middlewares=[auth()])
+user = app.route("/fuse/{user}/{token}", backend="/ext4/{user}", middlewares=[Gate()])
 user.route("private")
 user.route("status", virtual=True, handler=VirtualHandler())
 """
@@ -97,7 +106,7 @@ def test_routes_prints_tree(app_env: Path) -> None:
     assert result.exit_code == 0, result.output
     lines = result.stdout.splitlines()
     assert lines[0] == "/fuse/{user}/{token}  [backend /ext4/{user}]"
-    assert lines[1] == "  middleware: access_log(), auth(allow_all)"
+    assert lines[1] == "  middleware: Audit, gate(verify)"
     inherited = "[inherits /ext4/{user} from /fuse/{user}/{token}]"
     assert f"  /fuse/{{user}}/{{token}}/private  {inherited}" in lines
     assert "  /fuse/{user}/{token}/status  [virtual]" in lines
@@ -112,7 +121,7 @@ def test_resolve_masks_secret_params(app_env: Path) -> None:
     assert "real path:  /ext4/alice/private/notes.txt" in out
     assert "backend of: /fuse/{user}/{token}" in out
     assert "param():    token" in out
-    assert "middleware: access_log(), auth(allow_all)  (for read)" in out
+    assert "middleware: Audit, gate(verify)  (for read)" in out
     assert "T0k" not in out
 
 

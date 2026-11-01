@@ -24,13 +24,13 @@ flowchart LR
 
 | Module | Responsibility |
 |---|---|
-| `sluice/__init__.py` | Package version, and re-exports of the public API (`Sluice`, `Middleware`, `VirtualHandler`, `auth`, `access_log`, ...) |
+| `sluice/__init__.py` | Package version, and re-exports of the public API (`Sluice`, `Middleware`, `VirtualHandler`, `BackendView`, ...) |
 | `sluice/config.py` | Settings and their precedence (`_FILE` > env > file > default) |
 | `sluice/cli.py` | The `sluice` command (Typer): `config`, `mount`, `routes`, `resolve`, `version` |
 | `sluice/app.py` | `Sluice`, the registration API (`route`, `use`, `param`, `freeze`), and `load_app` for `app.module` |
 | `sluice/routing.py` | Pattern parsing, the `Route` tree, `compile_table` (validation, freezing to `Node`s), backend `Template`s, matching and specificity, `RouteTable.resolve` → `Resolution` |
 | `sluice/context.py` | `Context`, `Caller`, per-op argument and result dataclasses (`ReadArgs`, `Attr`, `Opened`, ...), `MountConfig`, `Secret`, `load_mount_config` |
-| `sluice/middleware.py` | `Middleware`, `run_pipeline` (params → pre → operation → post, with `failed`), `OPS`, and the built-ins `auth()` and `access_log()` |
+| `sluice/middleware.py` | `Middleware`, `run_pipeline` (params → pre → operation → post, with `failed`), and `OPS`. No concrete middleware: policies live in `examples/` (design 0002) |
 | `sluice/virtual.py` | `VirtualHandler` (the per-op interface and its read-only file defaults) and `SyntheticDir` (route-made directories) |
 | `sluice/inodes.py` | `InodeTable` (inode ↔ virtual path, lookup counts, rename and unlink bookkeeping) and `HandleTable` (open files and directories) |
 | `sluice/backend.py` | `Passthrough`: the same per-op interface as `VirtualHandler`, as syscalls on `ctx.real_path` in a bounded `ThreadPoolExecutor`. Each path op walks from the template's literal prefix (`Resolution.backend_prefix`) with `O_NOFOLLOW` and acts on the last name with `dir_fd=`. `BackendView` (`ctx.backend`) is the read-only subset for middleware, on the same pool and walk, confined to `Resolution.backend_root` |

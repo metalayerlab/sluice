@@ -3,7 +3,9 @@
 A sluice app is a Python module with a `Sluice` object in it. `app.module` (`module:attribute`) names it, and `app.dir` adds its directory to `sys.path`. Everything sluice does is configured through that object: routes, middleware, `param()` callbacks and virtual handlers. You never subclass the filesystem itself.
 
 ```python
-from sluice import Deny, Middleware, Sluice, VirtualHandler, access_log, auth
+from access_log import access_log  # examples/access_log.py, copied beside this module
+from auth import auth  # examples/auth.py
+from sluice import Deny, Middleware, Sluice, VirtualHandler
 
 app = Sluice()
 app.use(access_log())  # global: every call
@@ -116,12 +118,14 @@ On a backed route, `ctx.backend` is a read-only view of the route's backend; it 
 
 `path` is a real path inside `root`, absolute (`ctx.real_path.with_suffix("")`) or relative to `root`. A path outside `root`, or with a `..` component, is `EACCES`. Failures raise `FsError` with the real errno, so a hook can let them propagate.
 
-### Built-in middleware
+### Example middleware
 
-| | |
+sluice ships no concrete middleware: the package is the mechanism, and every policy is yours. The repository's [`examples/`](https://github.com/metalayerlab/sluice/tree/main/examples) directory holds middleware to copy and adapt. Copy a file beside your app module (`app.dir` is on `sys.path`) and import it by name, as in `from auth import auth`. The examples aren't installed with the package. Each one is tested in `tests/examples/`.
+
+| `examples/` | |
 |---|---|
-| `auth(verify, user_param="user", token_param="token")` | Denies the call unless `await verify(user, token, real_path, op)` returns True. The default `verify` allows everything: phase 1 provides the hook, not the policy. |
-| `access_log(logger=None, level=logging.INFO)` | Logs one line per call to `sluice.access`: op, `display_path` (secret segments masked), caller uid and pid, outcome (`ok` or the errno name), time, correlation id. |
+| `auth.py`: `auth(verify, user_param="user", token_param="token")` | Denies the call unless `await verify(user, token, real_path, op)` returns True. The default `verify` allows everything: phase 1 provides the hook, not the policy. |
+| `access_log.py`: `access_log(logger=None, level=logging.INFO)` | Logs one line per call to `sluice.access`: op, `display_path` (secret segments masked), caller uid and pid, outcome (`ok` or the errno name), time, correlation id. |
 
 ### The context
 

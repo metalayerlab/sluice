@@ -15,9 +15,13 @@ Four possible reasons, most likely first:
 
 `/fuse/{user}/{token}` has params, and params can't be listed: sluice doesn't know which users exist, and a token is never listed. Every name below `/fuse` is a directory you can `cd` into. Only literal route segments appear in listings. See [Writing an App](Writing-an-App#directories-that-routes-create).
 
+## Where did `auth()` and `access_log()` go?
+
+They moved out of the package into the repository's `examples/` directory (design 0002): sluice ships the mechanism, and every policy is code you own. Copy `examples/auth.py` and `examples/access_log.py` beside your app module, and change the import to `from auth import auth` and `from access_log import access_log`. Their behaviour and `repr` are unchanged. See [Writing an App](Writing-an-App#example-middleware).
+
 ## Is the `auth()` middleware secure?
 
-Not by itself. Phase 1's `auth()` allows everything until you give it a `verify` function, and sluice reaches the backing store with its own uid for every caller. Write `verify` yourself, keep `mount.allow_other` off unless you need it, and read [Security](Security).
+Not by itself. The example `auth()` allows everything until you give it a `verify` function, and sluice reaches the backing store with its own uid for every caller. Write `verify` yourself, keep `mount.allow_other` off unless you need it, and read [Security](Security).
 
 ## Can a middleware block, or call a synchronous library?
 

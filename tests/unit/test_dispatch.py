@@ -22,8 +22,6 @@ from sluice import (
     Secret,
     Sluice,
     VirtualHandler,
-    access_log,
-    auth,
 )
 from sluice.backend import Passthrough
 from sluice.context import Caller, SetattrArgs
@@ -47,6 +45,23 @@ class Redact(Middleware):
 
     async def post(self, ctx: Context, result: Any) -> Any:
         return result.replace(b"SECRET", b"******")
+
+
+class Paths(Middleware):
+    """Logs each call's display path, as an access log would."""
+
+    async def pre(self, ctx: Context) -> None:
+        logging.getLogger("test.paths").info("%s %s", ctx.op, ctx.display_path)
+
+
+class NoRenameInto(Middleware):
+    """Refuses a rename whose real path is under `locked`."""
+
+    ops = frozenset({"rename"})
+
+    async def pre(self, ctx: Context) -> None:
+        if ctx.real_path is not None and "locked" in ctx.real_path.parts:
+            raise Deny("locked")
 
 
 class AdminOnly(Middleware):
@@ -74,7 +89,7 @@ def dispatcher(backing: Path) -> Iterator[Dispatcher]:
         return {"raw": raw}
 
     app = Sluice()
-    app.use(access_log())
+    app.use(Paths())
     app.param("token", token, secret=True)
     user = app.route("/fuse/{user}/{token}", backend=f"{backing}/{{user}}")
     user.route("private", middlewares=[AdminOnly()])
@@ -233,11 +248,8 @@ def test_rename_within_a_route_is_refused_when_the_target_is(tmp_path: Path) -> 
     (tmp_path / "locked").mkdir()
     (tmp_path / "a" / "f").write_text("f", encoding="utf-8")
 
-    async def verify(user: Any, token: Any, real_path: Path | None, op: str) -> bool:
-        return op != "rename" or real_path is None or "locked" not in real_path.parts
-
     app = Sluice()
-    app.use(auth(verify))
+    app.use(NoRenameInto())
     app.route("/b", backend=str(tmp_path))
     io = Passthrough(1)
     d = Dispatcher(app.freeze(), io)
@@ -592,8 +604,10 @@ def test_bad_handle_is_ebadf(dispatcher: Dispatcher) -> None:
     run(dispatcher.releasedir(999))
 
 
-def test_access_log_masks_tokens(dispatcher: Dispatcher, caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.INFO, logger="sluice.access"):
+def test_display_path_masks_tokens(
+    dispatcher: Dispatcher, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.INFO, logger="test.paths"):
         run(cat(dispatcher, "/fuse/alice/T0k/notes.txt"))
     assert "/fuse/alice/********/notes.txt" in caplog.text
     assert "T0k" not in caplog.text

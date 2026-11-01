@@ -2,7 +2,7 @@
 
 ## Threat model
 
-sluice is a lab project, and phase 1 ships the hook points for policy, not a policy: `auth()` allows everything unless you inject a `verify()`. Read this before you point it at data that matters.
+sluice is a lab project, and sluice ships the hook points for policy, not a policy: the package has no concrete middleware, and the example `auth()` (`examples/auth.py`) allows everything unless you inject a `verify()`. Read this before you point it at data that matters.
 
 **What it exposes.** One FUSE mount, and nothing on the network: no ports, no HTTP. By default only the user who mounted it can enter the mount (the kernel enforces that). With `mount.allow_other`, every local user can.
 
@@ -41,7 +41,7 @@ sluice's own settings hold no secrets. Your app's secrets, if it has any, are fi
 - **Symlinks:** sluice reaches a real path one directory at a time from the template's literal prefix (`/ext4` for `/ext4/{user}`), opening each with `O_NOFOLLOW`, and runs the operation on the last name relative to that directory. A symlink in a directory position below the prefix fails the call (`ELOOP` or `ENOTDIR`) instead of being followed. The last name isn't followed either: `lstat`, `readlink`, `unlink` and `rename` act on the link itself, as before, and `open`, `truncate` or `readdir` of a link fail (the kernel follows links before it sends those). The prefix itself is yours and may be a symlink. xattr calls go through `/proc/self/fd`, so they need `/proc`. Middleware's `ctx.backend` keeps the same rule and accepts only paths inside the route's rendered backend, so `/ext4/alice`'s hooks can't read `/ext4/bob`; its `stat` follows a final symlink only while the target stays inside that root. A hook that calls `os.stat` or `open` itself gets none of this.
 - **Routes are validated before mounting:** params in templates must be captured, `{env.*}` must be allowlisted, `{secret.*}` and secret params are refused in templates and in routes that inherit a backend (their segments become the real path, which is logged), and every hook must be `async`.
 - **Environment:** only variables named in `env.expose` reach the app, and `SLUICE_*` names are refused.
-- **Authorisation** is middleware: `auth(verify)` with an injected `async verify(user, token, real_path, op)`, or your own `pre` hooks. `rename` is authorised against both its source and target paths: every `pre` hook on the target's chain runs with the target's context, including a middleware the source chain also has. With `mount.cache_ms` above 0, cached lookups and attributes skip middleware.
+- **Authorisation** is middleware you own: the example `auth(verify)` with an injected `async verify(user, token, real_path, op)`, or your own `pre` hooks. `rename` is authorised against both its source and target paths: every `pre` hook on the target's chain runs with the target's context, including a middleware the source chain also has. With `mount.cache_ms` above 0, cached lookups and attributes skip middleware.
 - **Failure is closed:** an exception in a `post` hook returns `EIO`, never the unmodified result. Any unexpected exception is `EIO`, never a crash of the mount.
 - **Not provided:** rate limiting, or protection against a caller who floods the mount. One event loop serves everyone, so a slow middleware slows every caller.
 

@@ -12,12 +12,10 @@ import inspect
 import logging
 import socket
 import ssl
-import time
 from collections.abc import Awaitable, Callable, Sequence
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from sluice.errors import Deny, FsError, RouteError
+from sluice.errors import FsError, RouteError
 
 if TYPE_CHECKING:
     from sluice.context import Context
@@ -169,7 +167,8 @@ async def run_pipeline(
 
     `also` are contexts for a second path (rename's target): before the operation, their
     `param()` callbacks and their whole chain's `pre` hooks run too, with that context. A
-    middleware on both chains runs once per path, so `auth()` checks the target as well.
+    middleware on both chains runs once per path, so an authorisation hook checks the target
+    as well.
     A `ctx.respond()` on either side stops the remaining `pre` hooks and skips the operation.
     Every hook that ran `pre` gets `post` or `failed` with the same context.
     """
@@ -214,82 +213,3 @@ async def run_pipeline(
         await _failed(observers, error)
         raise error from e
     return result
-
-
-async def allow_all(user: Any, token: Any, real_path: Path | None, op: str) -> bool:
-    """The phase 1 `verify`: allow everything."""
-    return True
-
-
-Verify = Callable[[Any, Any, Path | None, str], Awaitable[bool]]
-
-
-class Auth(Middleware):
-    """Deny a call unless `verify(user, token, real_path, op)` returns True."""
-
-    def __init__(self, verify: Verify, user_param: str, token_param: str) -> None:
-        self.verify = verify
-        self.user_param = user_param
-        self.token_param = token_param
-
-    async def pre(self, ctx: Context) -> None:
-        user = ctx.params.get(self.user_param)
-        token = ctx.params.get(self.token_param)
-        if not await self.verify(user, token, ctx.real_path, ctx.op):
-            raise Deny(f"{ctx.op} denied")
-
-    def __repr__(self) -> str:
-        return f"auth({getattr(self.verify, '__qualname__', self.verify)!s})"
-
-
-def auth(
-    verify: Verify = allow_all,
-    *,
-    user_param: str = "user",
-    token_param: str = "token",  # noqa: S107 - the name of a route param, not a credential
-) -> Auth:
-    """Authorisation hook point. `verify` is injected; the default allows everything."""
-    check_coroutine(verify, "auth(verify)")
-    return Auth(verify, user_param, token_param)
-
-
-class AccessLog(Middleware):
-    """Log every call's outcome: successes from `post`, denials and errors from `failed`."""
-
-    def __init__(self, logger: logging.Logger, level: int) -> None:
-        self.logger = logger
-        self.level = level
-
-    async def pre(self, ctx: Context) -> None:
-        ctx.state.setdefault("access_log.start", time.monotonic())
-
-    def _log(self, ctx: Context, outcome: str) -> None:
-        start = ctx.state.get("access_log.start", time.monotonic())
-        ms = (time.monotonic() - start) * 1000
-        caller = ctx.caller
-        self.logger.log(
-            self.level,
-            "%s %s uid=%d pid=%d -> %s (%.1fms) [%s]",
-            ctx.op,
-            ctx.display_path,
-            caller.uid,
-            caller.pid,
-            outcome,
-            ms,
-            ctx.correlation_id,
-        )
-
-    async def post(self, ctx: Context, result: Any) -> Any:
-        self._log(ctx, "ok")
-        return result
-
-    async def failed(self, ctx: Context, error: FsError) -> None:
-        self._log(ctx, errno.errorcode.get(error.errno, str(error.errno)))
-
-    def __repr__(self) -> str:
-        return "access_log()"
-
-
-def access_log(logger: logging.Logger | None = None, level: int = logging.INFO) -> AccessLog:
-    """Log each call: op, path (secret segments masked), caller, outcome, time."""
-    return AccessLog(logger or logging.getLogger("sluice.access"), level)

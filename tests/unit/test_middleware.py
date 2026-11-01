@@ -1,6 +1,5 @@
 import asyncio
 import errno
-import logging
 import socket
 import ssl
 from collections.abc import Awaitable, Callable
@@ -9,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from sluice import Context, Deny, FsError, Middleware, MountConfig, Sluice, access_log, auth
+from sluice import Context, Deny, FsError, Middleware, MountConfig, Sluice
 from sluice.middleware import run_pipeline
 from sluice.routing import RouteTable
 
@@ -447,12 +446,13 @@ def test_also_target_respond_short_circuits_the_operation() -> None:
 def test_rename_within_one_route_is_authorised_against_the_target() -> None:
     seen: list[str] = []
 
-    async def verify(user: Any, token: Any, real_path: Any, op: str) -> bool:
-        seen.append(str(real_path))
-        return "locked" not in str(real_path)
+    async def locked(ctx: Context) -> None:
+        seen.append(str(ctx.real_path))
+        if "locked" in str(ctx.real_path):
+            raise Deny("locked")
 
     app = Sluice()
-    app.use(auth(verify))
+    app.use(locked)
     app.route("/b", backend="/srv/b")
     src, dst = rename_contexts(app.freeze(), "/b/a/f", "/b/locked/f")
     with pytest.raises(FsError) as e:
@@ -461,53 +461,13 @@ def test_rename_within_one_route_is_authorised_against_the_target() -> None:
     assert seen == ["/srv/b/a/f", "/srv/b/locked/f"]
 
 
-def test_auth_default_allows_and_injected_verify_denies() -> None:
-    run(context(make(auth())))
-    calls: list[tuple[object, ...]] = []
-
-    async def verify(user: Any, token: Any, real_path: Any, op: str) -> bool:
-        calls.append((user, token, str(real_path), op))
-        return False
-
-    with pytest.raises(FsError) as e:
-        run(context(make(auth(verify))))
-    assert e.value.errno == errno.EACCES
-    assert calls == [("alice", "T0k", "/b/alice/f", "read")]
-
-
-def test_auth_refuses_sync_verify() -> None:
-    from sluice import RouteError
-
-    with pytest.raises(RouteError, match="async"):
-        auth(lambda *a: True)  # type: ignore[arg-type]  # the error under test
-
-
-def test_access_log_masks_secret_segments(caplog: pytest.LogCaptureFixture) -> None:
-    async def decode(ctx: Context, raw: Any) -> Any:
-        return raw
-
-    table = make(access_log(), params={"token": (decode, True)})
-    with caplog.at_level(logging.INFO, logger="sluice.access"):
-        run(context(table))
-
-        async def fail(ctx: Context) -> None:
-            raise FsError(errno.EPERM)
-
-        with pytest.raises(FsError):
-            run(context(table), fail)
-    assert "read /t/alice/********/f" in caplog.text
-    assert "-> ok" in caplog.text
-    assert "-> EPERM" in caplog.text
-    assert "T0k" not in caplog.text
-
-
 def test_function_middleware_repr() -> None:
     async def gate(ctx: Context) -> None:
         return None
 
-    table = make(gate, access_log(), auth())
+    table = make(gate, Recorder("r", []))
     res = table.resolve("/t/a/b")
     assert res is not None
     names = [repr(m) for m in res.middlewares]
     assert names[0].endswith("gate")
-    assert names[1:] == ["access_log()", "auth(allow_all)"]
+    assert names[1:] == ["Recorder"]

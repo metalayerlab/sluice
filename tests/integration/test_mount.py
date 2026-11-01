@@ -26,11 +26,23 @@ pytestmark = [
 ]
 
 APP = """
-from sluice import Deny, Middleware, Sluice, VirtualHandler, access_log, auth
+import logging
+
+from sluice import Deny, Middleware, Sluice, VirtualHandler
+
+log = logging.getLogger("itapp")
 
 
-async def verify(user, token, real_path, op):
-    return token == "T0k"
+class Log(Middleware):
+    async def post(self, ctx, result):
+        log.warning("%s %s -> ok", ctx.op, ctx.display_path)
+        return result
+
+
+class TokenGate(Middleware):
+    async def pre(self, ctx):
+        if ctx.params["token"] != "T0k":
+            raise Deny("bad token")
 
 
 async def decode(ctx, raw):
@@ -62,9 +74,9 @@ class Redact(Middleware):
 
 
 app = Sluice()
-app.use(access_log())
+app.use(Log())
 app.param("token", decode, secret=True)
-user = app.route("/fuse/{user}/{token}", backend="BACKING/{user}", middlewares=[auth(verify)])
+user = app.route("/fuse/{user}/{token}", backend="BACKING/{user}", middlewares=[TokenGate()])
 user.route("private", middlewares=[AdminOnly()])
 user.route("status", virtual=True, handler=Status())
 app.route("/fuse/{project}/config.yaml", virtual=True, handler=ConfigTemplate())
