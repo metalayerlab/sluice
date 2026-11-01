@@ -40,6 +40,10 @@ sluice was installed without the `fuse` extra. Reinstall with it (`uv tool insta
 
 The module isn't on `sys.path`, or importing it raised the error shown. Set `app.dir` to the directory that holds it, and check that `python -c 'import <module>'` works from there. `app.module` is `module:attribute`, e.g. `routes:app`.
 
+### `error: app.module: cannot import ...: cannot import name 'auth' from 'sluice'`
+
+`auth()` and `access_log()` left the package in the release after 0.1.2; they are now `examples/auth.py` and `examples/access_log.py` in the repository. Copy them beside your app module and import them as `from auth import auth` and `from access_log import access_log`. See [FAQ](Frequently-Asked-Questions).
+
 ### `error: /fuse/{user}: backend uses {x}, which no route captures` (and other route errors)
 
 The routes don't validate. The message names the route and the problem. Fix the app, and use `sluice routes` to check it without mounting. The full list of checks is in [Writing an App](Writing-an-App#what-freeze-checks).
@@ -62,7 +66,7 @@ A variable in the `env.expose` allowlist isn't set in sluice's environment. Set 
 
 ### Every access returns `Input/output error`
 
-A middleware, `param()` callback or virtual handler raised something other than `FsError` or `Deny`. sluice logs it at ERROR, with a traceback and the call's correlation id (`[1f]`), and returns `EIO`. A `post` hook that raises always gives `EIO`: it fails closed.
+A middleware, `param()` callback or virtual handler raised something other than `FsError`, `Deny` or an `OSError` with a kernel errno. sluice logs it at ERROR, with a traceback and the call's correlation id (`[1f]`), and returns `EIO`. A `post` hook that raises always gives `EIO`: it fails closed.
 
 ### Reads of a file a hook serves return `Input/output error`
 
@@ -78,7 +82,7 @@ sluice 0.1.1 and earlier: during a `rename`, a `ctx.respond()` from a `pre` hook
 
 ### `Permission denied` on everything below a path
 
-A `pre` hook or `param()` callback denied the call (`auth()` with a `verify` that returned False, or a `Deny`). The access log shows the op and path that got `EACCES`. `sluice resolve <path> --op <op>` lists the middleware that runs there.
+A `pre` hook or `param()` callback denied the call (the example `auth()` with a `verify` that returned False, or a `Deny`). The access log shows the op and path that got `EACCES`. `sluice resolve <path> --op <op>` lists the middleware that runs there.
 
 ### `Too many levels of symbolic links` or `Not a directory` below a symlink
 

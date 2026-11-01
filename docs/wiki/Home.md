@@ -8,7 +8,9 @@ The smallest example: one route, with the user's name and a token in the path.
 
 ```python
 # myroutes.py
-from sluice import Sluice, access_log, auth
+from access_log import access_log  # copied from the repository's examples/
+from auth import auth
+from sluice import Sluice
 
 
 async def verify(user, token, real_path, op):

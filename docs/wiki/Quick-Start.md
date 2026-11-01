@@ -27,10 +27,22 @@ Without the `[fuse]` extra, `sluice routes` and `sluice resolve` work but `sluic
    echo hello > /tmp/sluice-demo/data/alice/notes.txt
    ```
 
-2. Write the app, `/tmp/sluice-demo/demo.py`:
+2. Copy the two example middlewares the app uses next to it. sluice ships the mechanism, and policies are example code you own:
+
+   ```sh
+   for f in auth access_log; do
+     curl -fsSLo /tmp/sluice-demo/$f.py https://raw.githubusercontent.com/metalayerlab/sluice/main/examples/$f.py
+   done
+   ```
+
+   From a checkout, `cp examples/auth.py examples/access_log.py /tmp/sluice-demo/` does the same.
+
+3. Write the app, `/tmp/sluice-demo/demo.py`:
 
    ```python
-   from sluice import Sluice, VirtualHandler, access_log, auth
+   from access_log import access_log
+   from auth import auth
+   from sluice import Sluice, VirtualHandler
 
 
    async def verify(user, token, real_path, op):
@@ -51,7 +63,7 @@ Without the `[fuse]` extra, `sluice routes` and `sluice resolve` work but `sluic
    user.route("status", virtual=True, handler=Status())
    ```
 
-3. Point sluice at it and check the routes without mounting:
+4. Point sluice at it and check the routes without mounting:
 
    ```console
    $ export SLUICE_APP_DIR=/tmp/sluice-demo SLUICE_APP_MODULE=demo:app
@@ -62,13 +74,13 @@ Without the `[fuse]` extra, `sluice routes` and `sluice resolve` work but `sluic
        middleware: access_log(), auth(verify)
    ```
 
-4. Mount it in one terminal (it stays in the foreground and logs every call):
+5. Mount it in one terminal (it stays in the foreground and logs every call):
 
    ```sh
    SLUICE_MOUNT_POINT=/tmp/sluice-demo/mnt sluice mount
    ```
 
-5. Use it from another terminal:
+6. Use it from another terminal:
 
    ```console
    $ ls /tmp/sluice-demo/mnt/home/alice/T0k
@@ -79,7 +91,7 @@ Without the `[fuse]` extra, `sluice routes` and `sluice resolve` work but `sluic
    cat: /tmp/sluice-demo/mnt/home/alice/wrong/notes.txt: Permission denied
    ```
 
-6. Stop it with Ctrl-C in the first terminal: it unmounts and exits 0.
+7. Stop it with Ctrl-C in the first terminal: it unmounts and exits 0.
 
 ## Next steps
 

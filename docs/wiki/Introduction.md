@@ -6,7 +6,7 @@ sluice is a FUSE filesystem whose behaviour is a Python program. You declare **r
 
 It is for experimenting with per-call policy on a filesystem: one mount that shows each user only their own subtree, a `status` file that is computed on every read, a log file whose secrets are redacted on the way out, or a config file assembled from mount-time secrets and never written to disk.
 
-It is deliberately **not** a production access-control system. Phase 1 delivers the structure (router, middleware pipeline, passthrough, extension points) with stub policy. `auth()` allows everything unless you inject a `verify()`. Content rewriting works for a whole read, not across read boundaries. There is no caching or performance work.
+It is deliberately **not** a production access-control system. Phase 1 delivers the structure (router, middleware pipeline, passthrough, extension points) and no policy: the package ships no concrete middleware, and `examples/` holds policies to copy (an `auth()` that allows everything unless you inject a `verify()`, an access log). Content rewriting works for a whole read, not across read boundaries. There is no caching or performance work.
 
 ## How it works
 

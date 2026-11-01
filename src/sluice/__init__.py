@@ -11,7 +11,7 @@ from sluice.app import Sluice
 from sluice.backend import BackendView
 from sluice.context import Attr, Caller, Context, DirEntry, MountConfig, Opened, Secret
 from sluice.errors import Deny, FsError, RouteError
-from sluice.middleware import Middleware, access_log, auth
+from sluice.middleware import Middleware
 from sluice.routing import Route
 from sluice.virtual import VirtualHandler
 
@@ -37,6 +37,4 @@ __all__ = [
     "Sluice",
     "VirtualHandler",
     "__version__",
-    "access_log",
-    "auth",
 ]
