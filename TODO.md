@@ -5,7 +5,7 @@ the team (and its AI assistants) should know at a glance.
 
 ## Open
 
-- [ ] Add an integration job to CI (`uv sync --extra fuse`; libfuse3 now comes from `contrib/system-packages.txt`); design 0001, question 10
+- [ ] Delete `.github/workflows/integration.yml` (a workaround) when the template's integration job lands (metalayerlab/project-template#81)
 
 ## Decided against (don't re-propose without reading this first)
 
