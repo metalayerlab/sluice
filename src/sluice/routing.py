@@ -9,7 +9,7 @@ from __future__ import annotations
 import errno
 import posixpath
 import re
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import IntEnum
 from pathlib import Path, PurePosixPath
@@ -20,6 +20,7 @@ from interpose.secret import MASK
 
 from sluice.context import MountConfig
 from sluice.errors import FsError, RouteError
+from sluice.metrics import NAMESPACE, Metrics, MetricsFile
 from sluice.middleware import (
     Middleware,
     MwEntry,
@@ -251,6 +252,7 @@ class Resolution:
     owner: Route | None = None  # The route whose backend this is
     handler: VirtualHandler | None = None
     direct_io: bool = False
+    metrics: Metrics | None = None  # The mount's, when `metrics.enabled` is on
 
     @property
     def route(self) -> Route:
@@ -303,10 +305,12 @@ class RouteTable:
         root: Node,
         params: Sequence[ParamSpec],
         config: MountConfig,
+        metrics: Metrics | None = None,
     ) -> None:
         self.root = root
         self.params = tuple(params)
         self.config = config
+        self.metrics = metrics
         self.secret_params = frozenset(p.name for p in params if p.secret)
 
     def resolve(self, path: PurePosixPath | str) -> Resolution | None:
@@ -364,6 +368,7 @@ class RouteTable:
             children=tuple(listed),
             display_path="/" + "/".join(masked),
             direct_io=any(n.direct_io for n in chain),
+            metrics=self.metrics,
         )
         if node.virtual:
             return replace(base, kind="virtual", handler=node.handler)
@@ -415,9 +420,28 @@ def compile_table(
     root: Route,
     params: Sequence[ParamSpec],
     config: MountConfig,
+    metrics: Metrics | None = None,
 ) -> RouteTable:
-    """Validate the tree under `root` and freeze it. Raises `RouteError`."""
+    """Validate the tree under `root` and freeze it. Raises `RouteError`.
+
+    With `metrics`, `/.sluice/metrics` serves them, and the app's own routes stay out of
+    `/.sluice` (design 0005).
+    """
     secret = {p.name for p in params if p.secret}
+    reserved: list[Route] = []
+    if metrics is not None:
+        for child in root.children:
+            first = child.segments[0] if child.segments else None
+            if first is not None and first.kind is Kind.LITERAL and first.text == NAMESPACE:
+                raise RouteError(
+                    f"{child.full_pattern}: /{NAMESPACE} is reserved for sluice's own files"
+                    " while metrics.enabled is on"
+                )
+        # A grouping route of its own, so /.sluice is a directory even under a root `{param}`
+        # route. Not added to the app's tree: freezing again must not find it there.
+        group = Route(f"/{NAMESPACE}", parent=root)
+        group.route("metrics", virtual=True, handler=MetricsFile(metrics))
+        reserved.append(group)
     for spec in params:
         if spec.func is not None:
             check_coroutine(spec.func, f"param({spec.name!r})")
@@ -451,7 +475,8 @@ def compile_table(
                 if name in secret:
                     raise RouteError(f"{where}: backend can't use the secret param {{{name}}}")
         backed = not route.virtual and (backed or template is not None)
-        children = tuple(build(c, captured, backed) for c in route.children)
+        kids = [*route.children, *reserved] if route is root else route.children
+        children = tuple(build(c, captured, backed) for c in kids)
         shapes: dict[tuple[tuple[Kind, str], ...], Route] = {}
         for child in children:
             shape = tuple(
@@ -480,4 +505,13 @@ def compile_table(
         children = tuple(attach(c, entries) for c in node.children)
         return replace(node, children=children, pipeline=pipeline(entries))
 
-    return RouteTable(attach(build(root, frozenset(), False), ()), params, config)
+    tree = attach(build(root, frozenset(), False), ())
+    if metrics is not None:
+        metrics.declare_middleware(e.name for n in _nodes(tree) for e in n.pipeline.entries)
+    return RouteTable(tree, params, config, metrics)
+
+
+def _nodes(node: Node) -> Iterator[Node]:
+    yield node
+    for child in node.children:
+        yield from _nodes(child)

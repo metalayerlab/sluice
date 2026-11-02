@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from contextlib import contextmanager
 from importlib.util import find_spec
 from pathlib import Path
 
@@ -84,8 +85,8 @@ app.route("/logs/{user}", backend="BACKING/{user}", middlewares=[Redact()], dire
 """
 
 
-@pytest.fixture
-def mounted(tmp_path: Path) -> Iterator[Path]:
+@contextmanager
+def _mount(tmp_path: Path, extra: dict[str, str]) -> Iterator[Path]:
     backing, mnt, secrets = tmp_path / "ext4", tmp_path / "mnt", tmp_path / "secrets"
     (backing / "alice" / "private").mkdir(parents=True)
     (backing / "bob").mkdir()
@@ -102,6 +103,7 @@ def mounted(tmp_path: Path) -> Iterator[Path]:
         "SLUICE_MOUNT_POINT": str(mnt),
         "SLUICE_SECRETS_DIR": str(secrets),
     }
+    env |= extra
     log = tmp_path / "sluice.log"
     with log.open("wb") as out:
         proc = subprocess.Popen(
@@ -128,6 +130,18 @@ def mounted(tmp_path: Path) -> Iterator[Path]:
     text = log.read_text(encoding="utf-8")
     assert "T0k" not in text  # the token is a secret param: masked in every log line
     assert "Traceback" not in text, text  # no error, including at shutdown
+
+
+@pytest.fixture
+def mounted(tmp_path: Path) -> Iterator[Path]:
+    with _mount(tmp_path, {}) as mnt:
+        yield mnt
+
+
+@pytest.fixture
+def mounted_with_metrics(tmp_path: Path) -> Iterator[Path]:
+    with _mount(tmp_path, {"SLUICE_METRICS_ENABLED": "true"}) as mnt:
+        yield mnt
 
 
 def test_multi_tenant_read_write(mounted: Path) -> None:
@@ -216,3 +230,42 @@ def test_symlinks_inside_the_backend_work(mounted: Path) -> None:
     assert (home / "to-sub" / "f").read_text(encoding="utf-8") == "f"
     assert (home / "to-notes").read_text(encoding="utf-8") == "hello SECRET world\n"
     assert os.readlink(home / "to-sub") == "sub"
+
+
+def _samples(text: str) -> dict[str, float]:
+    rows = (r.rpartition(" ") for r in text.splitlines() if r and not r.startswith("#"))
+    return {name: float(value) for name, _, value in rows}
+
+
+def test_no_metrics_file_by_default(mounted: Path) -> None:
+    assert not (mounted / ".sluice").exists()
+
+
+def test_metrics_file(mounted_with_metrics: Path) -> None:
+    mnt = mounted_with_metrics
+    assert ".sluice" in os.listdir(mnt)
+    assert os.listdir(mnt / ".sluice") == ["metrics"]
+    home = mnt / "fuse" / "alice" / "T0k"
+    assert (home / "notes.txt").read_text(encoding="utf-8") == "hello SECRET world\n"
+    with pytest.raises(PermissionError):
+        (mnt / "fuse" / "alice" / "wrong" / "notes.txt").read_text(encoding="utf-8")
+    with pytest.raises(FileNotFoundError):
+        (home / "missing").stat()
+    metrics = mnt / ".sluice" / "metrics"
+    text = metrics.read_text(encoding="utf-8")
+    samples = _samples(text)
+    assert samples['sluice_call_duration_seconds_count{op="read"}'] >= 1
+    assert samples['sluice_call_errors_total{op="lookup",errno="EACCES"}'] >= 1
+    assert samples['sluice_call_errors_total{op="lookup",errno="ENOENT"}'] >= 1
+    assert samples['sluice_middleware_seconds_total{middleware="TokenGate"}'] > 0
+    for value in ("alice", "T0k", "wrong", "notes"):
+        assert value not in text  # never a path, a param or a user as a label
+    # Rendered at open: a second open sees the first one's calls.
+    again = _samples(metrics.read_text(encoding="utf-8"))
+    assert again['sluice_call_duration_seconds_count{op="open"}'] > samples.get(
+        'sluice_call_duration_seconds_count{op="open"}', 0
+    )
+    with pytest.raises(OSError) as e:
+        metrics.write_text("x", encoding="utf-8")
+    assert e.value.errno in {errno.EROFS, errno.EACCES}
+    assert not os.stat(metrics).st_mode & 0o222

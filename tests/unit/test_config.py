@@ -27,6 +27,7 @@ def test_keys_and_variables_are_unchanged() -> None:
         ("env.expose", "SLUICE_ENV_EXPOSE"),
         ("secrets.dir", "SLUICE_SECRETS_DIR"),
         ("pipeline.slow_ms", "SLUICE_PIPELINE_SLOW_MS"),
+        ("metrics.enabled", "SLUICE_METRICS_ENABLED"),
     ]
     assert CONFIG_ENV == "SLUICE_CONFIG"
     assert Path("/etc/sluice/config.yaml") == DEFAULT_CONFIG_PATH
@@ -47,6 +48,7 @@ def test_defaults_when_no_file(tmp_path: Path) -> None:
     assert cfg.env_expose == ()
     assert cfg.secrets_dir == Path("/run/secrets")
     assert cfg.pipeline_slow_ms == 0
+    assert cfg.metrics_enabled is False
     assert set(cfg.sources.values()) == {"default"}
 
 

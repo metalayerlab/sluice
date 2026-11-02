@@ -42,3 +42,7 @@ secrets:
 pipeline:
   # Warn when a middleware or handler holds the event loop longer than this (ms); 0 = off
   slow_ms: 0
+
+metrics:
+  # Serve Prometheus metrics as the read-only file /.sluice/metrics; reserves /.sluice
+  enabled: false

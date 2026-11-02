@@ -8,12 +8,14 @@ are raised as `FsError`; `fs.py` turns them into errno replies.
 from __future__ import annotations
 
 import errno
+import functools
 import itertools
 import logging
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Concatenate
 
 from sluice.backend import BackendView, Passthrough
 from sluice.context import (
@@ -81,6 +83,34 @@ async def _orphan_setattr(impl: Impl, ctx: Context, handle: Handle) -> Attr:
     if isinstance(impl, Passthrough):
         return await impl.fsetattr(ctx, handle.opened)
     return await impl.setattr(ctx)
+
+
+def _measured[**P, T](
+    fn: Callable[Concatenate[Dispatcher, P], Awaitable[T]],
+) -> Callable[Concatenate[Dispatcher, P], Awaitable[T]]:
+    """Count the call and its duration under the method's name (an op in `OPS`), and its errno
+    if it fails: the one `fs.py` replies with (an `FsError`'s, else `EIO`). Routing failures
+    count too, as they never reach the pipeline. Nothing at all without metrics."""
+    op = fn.__name__
+
+    @functools.wraps(fn)
+    async def wrapper(self: Dispatcher, /, *args: P.args, **kwargs: P.kwargs) -> T:
+        metrics = self.table.metrics
+        if metrics is None:
+            return await fn(self, *args, **kwargs)
+        start = time.perf_counter()
+        try:
+            result = await fn(self, *args, **kwargs)
+        except FsError as e:
+            metrics.call(op, time.perf_counter() - start, e.errno)
+            raise
+        except Exception:
+            metrics.call(op, time.perf_counter() - start, errno.EIO)
+            raise
+        metrics.call(op, time.perf_counter() - start, None)
+        return result
+
+    return wrapper
 
 
 class Dispatcher:
@@ -154,6 +184,7 @@ class Dispatcher:
 
     # Path operations
 
+    @_measured
     async def lookup(self, parent: int, name: str, caller: Caller | None = None) -> Entry:
         path = self.inodes.child(parent, name)
         attr = await self._call("lookup", path, caller, lambda i, c: i.getattr(c))
@@ -163,6 +194,7 @@ class Dispatcher:
         for inode, count in inodes:
             self.inodes.forget(inode, count)
 
+    @_measured
     async def getattr(self, inode: int, caller: Caller | None = None) -> Entry:
         fh = self._orphan(inode)
         if fh is not None:
@@ -170,6 +202,7 @@ class Dispatcher:
         path = self.inodes.path(inode)
         return Entry(inode, await self._call("getattr", path, caller, lambda i, c: i.getattr(c)))
 
+    @_measured
     async def setattr(
         self,
         inode: int,
@@ -192,26 +225,31 @@ class Dispatcher:
             return None
         return fh if fh is not None else self.handles.find(inode)
 
+    @_measured
     async def readlink(self, inode: int, caller: Caller | None = None) -> str:
         path = self.inodes.path(inode)
         result: str = await self._call("readlink", path, caller, lambda i, c: i.readlink(c))
         return result
 
+    @_measured
     async def mkdir(self, parent: int, name: str, mode: int, caller: Caller | None = None) -> Entry:
         path = self.inodes.child(parent, name)
         attr = await self._call("mkdir", path, caller, lambda i, c: i.mkdir(c), MkdirArgs(mode))
         return self._entry(path, attr)
 
+    @_measured
     async def rmdir(self, parent: int, name: str, caller: Caller | None = None) -> None:
         path = self.inodes.child(parent, name)
         await self._call("rmdir", path, caller, lambda i, c: i.rmdir(c))
         self.inodes.unlink(path)
 
+    @_measured
     async def unlink(self, parent: int, name: str, caller: Caller | None = None) -> None:
         path = self.inodes.child(parent, name)
         await self._call("unlink", path, caller, lambda i, c: i.unlink(c))
         self.inodes.unlink(path)
 
+    @_measured
     async def symlink(
         self, parent: int, name: str, target: str, caller: Caller | None = None
     ) -> Entry:
@@ -220,6 +258,7 @@ class Dispatcher:
         attr = await self._call("symlink", path, caller, lambda i, c: i.symlink(c), args)
         return self._entry(path, attr)
 
+    @_measured
     async def rename(
         self,
         parent_old: int,
@@ -298,12 +337,14 @@ class Dispatcher:
         fh = self.handles.add(handle)
         return FileInfo(fh, handle.opened.direct_io, handle.opened.keep_cache)
 
+    @_measured
     async def open(self, inode: int, flags: int, caller: Caller | None = None) -> FileInfo:
         path = self.inodes.path(inode)
         _, handle = await self._open("open", path, caller, lambda i, c: i.open(c), OpenArgs(flags))
         handle.inode = inode
         return self._file_info(handle)
 
+    @_measured
     async def create(
         self, parent: int, name: str, mode: int, flags: int, caller: Caller | None = None
     ) -> tuple[FileInfo, Entry]:
@@ -314,21 +355,25 @@ class Dispatcher:
         handle.inode = entry.inode
         return self._file_info(handle), entry
 
+    @_measured
     async def read(self, fh: int, offset: int, size: int) -> bytes:
         result: bytes = await self._on_handle(
             "read", fh, lambda i, c, h: i.read(c, h.opened), ReadArgs(offset, size)
         )
         return result
 
+    @_measured
     async def write(self, fh: int, offset: int, data: bytes) -> int:
         result: int = await self._on_handle(
             "write", fh, lambda i, c, h: i.write(c, h.opened), WriteArgs(offset, data)
         )
         return result
 
+    @_measured
     async def flush(self, fh: int) -> None:
         await self._on_handle("flush", fh, lambda i, c, h: i.flush(c, h.opened))
 
+    @_measured
     async def fsync(self, fh: int, datasync: bool) -> None:
         args = FsyncArgs(datasync)
         await self._on_handle("fsync", fh, lambda i, c, h: i.fsync(c, h.opened), args)
@@ -341,12 +386,14 @@ class Dispatcher:
 
     # Directories
 
+    @_measured
     async def opendir(self, inode: int, caller: Caller | None = None) -> int:
         path = self.inodes.path(inode)
         _, handle = await self._open("opendir", path, caller, lambda i, c: i.opendir(c), None)
         handle.inode = inode
         return self.handles.add(handle)
 
+    @_measured
     async def readdir(self, fh: int, start: int = 0) -> list[Listed]:
         handle = self.handles.get(fh)
         if start == 0 or handle.entries is None:
@@ -394,6 +441,7 @@ class Dispatcher:
 
     # Everything else
 
+    @_measured
     async def statfs(self, caller: Caller | None = None) -> StatFs:
         async def synthetic(impl: Impl, ctx: Context) -> StatFs:
             return StatFs()
@@ -401,18 +449,21 @@ class Dispatcher:
         result: StatFs = await self._call("statfs", PurePosixPath("/"), caller, synthetic)
         return result
 
+    @_measured
     async def access(self, inode: int, mode: int, caller: Caller | None = None) -> bool:
         path = self.inodes.path(inode)
         args = AccessArgs(mode)
         result: bool = await self._call("access", path, caller, lambda i, c: i.access(c), args)
         return result
 
+    @_measured
     async def getxattr(self, inode: int, name: str, caller: Caller | None = None) -> bytes:
         path = self.inodes.path(inode)
         args = XattrArgs(name)
         result: bytes = await self._call("getxattr", path, caller, lambda i, c: i.getxattr(c), args)
         return result
 
+    @_measured
     async def setxattr(
         self, inode: int, name: str, value: bytes, caller: Caller | None = None
     ) -> None:
@@ -420,11 +471,13 @@ class Dispatcher:
         args = XattrArgs(name, value)
         await self._call("setxattr", path, caller, lambda i, c: i.setxattr(c), args)
 
+    @_measured
     async def listxattr(self, inode: int, caller: Caller | None = None) -> list[str]:
         path = self.inodes.path(inode)
         result: list[str] = await self._call("listxattr", path, caller, lambda i, c: i.listxattr(c))
         return result
 
+    @_measured
     async def removexattr(self, inode: int, name: str, caller: Caller | None = None) -> None:
         path = self.inodes.path(inode)
         args = XattrArgs(name)

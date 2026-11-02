@@ -8,6 +8,7 @@ from collections.abc import Sequence
 
 from sluice.context import MountConfig
 from sluice.errors import AppLoadError, RouteError
+from sluice.metrics import Metrics
 from sluice.routing import ParamFunc, ParamSpec, Route, RouteTable, compile_table
 from sluice.virtual import VirtualHandler
 
@@ -57,9 +58,16 @@ class Sluice:
     def root(self) -> Route:
         return self._root
 
-    def freeze(self, config: MountConfig | None = None) -> RouteTable:
-        """Validate the route tree (raising `RouteError`) and freeze it."""
-        return compile_table(self._root, list(self._params.values()), config or MountConfig())
+    def freeze(
+        self, config: MountConfig | None = None, *, metrics: Metrics | None = None
+    ) -> RouteTable:
+        """Validate the route tree (raising `RouteError`) and freeze it.
+
+        `metrics` (the mount's, when `metrics.enabled` is on) adds `/.sluice/metrics`.
+        """
+        return compile_table(
+            self._root, list(self._params.values()), config or MountConfig(), metrics
+        )
 
 
 def load_app(spec: str, directory: str = "") -> Sluice:

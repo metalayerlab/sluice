@@ -10,6 +10,8 @@ sluice is one foreground process per mount. It needs the FUSE device, permission
 - **`user_allow_other` in `/etc/fuse.conf`**, only if you set `mount.allow_other` and don't run as root.
 - **An empty mount point** that sluice's user can write to, and read and write access to every backing directory.
 
+**Monitoring:** with `metrics.enabled: true`, the mount serves Prometheus text at `<mount.point>/.sluice/metrics`. Nothing listens on a port: copy the file into node_exporter's textfile directory on a timer, or have any process that can read the mount scrape it (see [In-Depth Configuration](In-Depth-Configuration#metrics)).
+
 Stop it with SIGTERM or SIGINT: it unmounts and exits 0. If it was killed, unmount by hand with `fusermount3 -u <mount.point>` before starting it again.
 
 ## systemd

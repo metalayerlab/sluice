@@ -22,6 +22,7 @@ from sluice.config import Config
 from sluice.context import load_mount_config
 from sluice.dispatch import Dispatcher
 from sluice.errors import MountError
+from sluice.metrics import Metrics
 from sluice.routing import RouteTable
 
 log = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ def prepare(cfg: Config) -> RouteTable:
     """Import the app, load `MountConfig` and freeze the routes: what every command needs."""
     app = load_app(cfg.app_module, cfg.app_dir)
     mount_config = load_mount_config(cfg)
-    table = app.freeze(mount_config)
+    table = app.freeze(mount_config, metrics=Metrics() if cfg.metrics_enabled else None)
     if mount_config.secret:
         log.info("secrets loaded: %s", ", ".join(sorted(mount_config.secret)))
     return table

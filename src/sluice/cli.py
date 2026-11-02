@@ -93,6 +93,7 @@ def show_config(config: ConfigOption = None) -> None:
         "env.expose": ",".join(cfg.env_expose),
         "secrets.dir": cfg.secrets_dir,
         "pipeline.slow_ms": cfg.pipeline_slow_ms,
+        "metrics.enabled": cfg.metrics_enabled,
     }
     for setting in SETTINGS:
         shown = MASK if setting.secret else values.get(setting.key)
