@@ -25,6 +25,8 @@ time, never per call (TODO.md, "Decided against").
 - **Dependency:** `interpose @ git+https://github.com/metalayerlab/interpose@v0.1.0`, a tag on GitHub,
   never PyPI. hatchling needs `[tool.hatch.metadata] allow-direct-references = true` for it.
   `pyyaml` stops being a direct dependency (interpose brings it; sluice no longer imports it).
+  uv fetches a git dependency with `git`, so `contrib/system-packages.txt` adds it to `build:` (CI's
+  test job and the image's builder stage; the runtime image doesn't get it).
 - **`config.py`** becomes one `SETTINGS = Settings("SLUICE_", [Setting(...), ...],
   default_path=Path("/etc/sluice/config.yaml"))`, the only place `Settings` is built, with
   `CONFIG_ENV = SETTINGS.config_env`, and `ConfigError` re-exported from `interpose.settings`.
