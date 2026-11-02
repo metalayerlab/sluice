@@ -190,8 +190,7 @@ class Config:
 def load_config(path: Path | None = None, environ: Mapping[str, str] | None = None) -> Config:
     """Load the configuration. A missing config file is not an error: defaults apply."""
     r = SETTINGS.resolve(path, environ)
-    v = r.values
-    threads, abandoned = cast(int, v["io.threads"]), cast(int, v["backend.max_abandoned"])
+    threads, abandoned = r.int("io.threads"), r.int("backend.max_abandoned")
     if abandoned > threads:
         # More than the pool holds: the pool would be full before the cap is ever reached.
         raise ConfigError(
@@ -199,20 +198,21 @@ def load_config(path: Path | None = None, environ: Mapping[str, str] | None = No
             f" (from {r.sources['backend.max_abandoned']})"
         )
     return Config(
-        log_level=cast(str, v["log_level"]).upper(),
-        app_module=cast(str, v["app.module"]),
-        app_dir=cast(str, v["app.dir"]),
-        mount_point=cast(str, v["mount.point"]),
-        mount_fsname=cast(str, v["mount.fsname"]),
-        mount_allow_other=cast(bool, v["mount.allow_other"]),
-        mount_cache_ms=cast(int, v["mount.cache_ms"]),
-        mount_debug=cast(bool, v["mount.debug"]),
+        # one_of gives the declared spelling: `info` is already `INFO` here.
+        log_level=r.str("log_level"),
+        app_module=r.str("app.module"),
+        app_dir=r.str("app.dir"),
+        mount_point=r.str("mount.point"),
+        mount_fsname=r.str("mount.fsname"),
+        mount_allow_other=r.bool("mount.allow_other"),
+        mount_cache_ms=r.int("mount.cache_ms"),
+        mount_debug=r.bool("mount.debug"),
         io_threads=threads,
-        env_expose=cast(tuple[str, ...], v["env.expose"]),
-        secrets_dir=Path(cast(str, v["secrets.dir"])),
-        pipeline_slow_ms=cast(int, v["pipeline.slow_ms"]),
-        pipeline_timeout_ms=cast(int, v["pipeline.timeout_ms"]),
+        env_expose=r.list("env.expose"),
+        secrets_dir=Path(r.str("secrets.dir")),
+        pipeline_slow_ms=r.int("pipeline.slow_ms"),
+        pipeline_timeout_ms=r.int("pipeline.timeout_ms"),
         backend_max_abandoned=abandoned,
-        metrics_enabled=cast(bool, v["metrics.enabled"]),
+        metrics_enabled=r.bool("metrics.enabled"),
         sources=dict(r.sources),
     )
