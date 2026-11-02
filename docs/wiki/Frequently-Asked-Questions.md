@@ -33,7 +33,7 @@ Not by itself. The example `auth()` allows everything until you give it a `verif
 
 ## Can a middleware block, or call a synchronous library?
 
-Not on the event loop: one loop serves the whole mount, so a blocking hook stalls every caller. `await` async libraries, or wrap synchronous calls in `await asyncio.to_thread(...)`. `pipeline.slow_ms` logs any step that holds the loop longer than you allow. Synchronous hooks (`def` instead of `async def`) are refused before mounting.
+Not on the event loop: one loop serves the whole mount, so a blocking hook stalls every caller. `await` async libraries, or wrap synchronous calls in `await asyncio.to_thread(...)`. `pipeline.slow_ms` logs any step that holds the loop longer than you allow, and `pipeline.timeout_ms` cancels a hook that runs too long (it must be cancel-safe: see [Writing an App](Writing-an-App#timeouts-and-cancellation)). Synchronous hooks (`def` instead of `async def`) are refused before mounting.
 
 ## Why does renaming between two users' directories fail with "Invalid cross-device link"?
 

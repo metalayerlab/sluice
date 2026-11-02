@@ -100,7 +100,16 @@ A plain `async def fn(ctx)` passed as middleware is a `pre` hook.
 - `forget`, `release` and `releasedir` bypass middleware: they are cleanup the kernel can't act on the failure of.
 - **`rename`** is authorised against both paths: the source route's chain runs, and before the operation the target route's whole chain runs its `pre` hooks too, with a context for the target path. A middleware on both chains (any `app.use()` one, or every one when both paths are on the same route) runs once per path, and each hook that ran `pre` gets `post` or `failed` with the same context, so `access_log()` logs a rename once for each path. If the target's `param()` callbacks fail, the target's whole chain gets `failed` too, as the source's does for its own. A `ctx.respond()` in a target-side `pre` hook skips the rename, as on the source side. A rename between different backends, or into or out of a virtual route, is `EXDEV`, and tools fall back to copy and delete.
 
-Middleware runs on the event loop that serves the whole mount. **Never block in a hook:** no `time.sleep`, no synchronous network or disk I/O. Use `await` and `asyncio.to_thread` instead. `pipeline.slow_ms` logs any step that holds the loop too long.
+Middleware runs on the event loop that serves the whole mount. **Never block in a hook:** no `time.sleep`, no synchronous network or disk I/O. Read backend files through `ctx.backend` (below), and `await` async libraries or `asyncio.to_thread` for anything else. `pipeline.slow_ms` logs any step that holds the loop too long.
+
+### Timeouts and cancellation
+
+With `pipeline.timeout_ms` set, a hook that runs longer is **cancelled at the `await` it is suspended in**, and the call fails with `EIO` (design 0006). Write every hook so that can happen:
+
+- **Be cancel-safe.** Leave shared state consistent at every `await`: take and release locks with `async with`, undo partial work in `finally`.
+- **Never swallow `CancelledError`.** Don't catch `BaseException` or `asyncio.CancelledError` without re-raising it. A hook that swallows it runs on past its limit and the call carries on as if no timeout fired.
+- **Blocking work goes through `ctx.backend`**, which runs it in the I/O pool. A hook that blocks the loop can't be cancelled at all, and stalls every call.
+- **A timed-out backend call keeps running** in its thread: Python can't stop a syscall. Its result is dropped, and a write may still happen. `backend.max_abandoned` bounds how many such threads a hung backend can hold: past it, backend calls fail fast with `EIO` until they finish (see [In-Depth Configuration](In-Depth-Configuration#settings)). Work you start with `asyncio.to_thread` isn't counted there: prefer `ctx.backend` for file I/O.
 
 An `OSError` raised in a hook fails the call with its own errno (a hook's `FileNotFoundError` is `ENOENT`). Any other unexpected exception is `EIO`, with its traceback logged, and so are OSErrors whose number isn't a kernel errno (`socket.gaierror`, `ssl.SSLError`).
 

@@ -58,7 +58,7 @@ A param registered with `secret=True` is used where it would end up in a real pa
 
 ### `error: mount.cache_ms: expected int, got 0.5` (or another number setting)
 
-A number setting (`mount.cache_ms`, `pipeline.slow_ms`, `io.threads`) holds something that isn't a whole number: a decimal, `true`/`false`, or a list. sluice refuses it rather than round it, since `0.5` would quietly become `0`. The message ends with where the value came from: `(from file)`, or the variable's name. Write a whole number, e.g. `cache_ms: 500`. Environment variables are strings, so `SLUICE_MOUNT_CACHE_MS=500` works, but write digits only: since sluice moved to interpose (design 0003), `SLUICE_MOUNT_CACHE_MS=1_000` is refused.
+A number setting (`mount.cache_ms`, `pipeline.slow_ms`, `pipeline.timeout_ms`, `io.threads`) holds something that isn't a whole number: a decimal, `true`/`false`, or a list. sluice refuses it rather than round it, since `0.5` would quietly become `0`. The message ends with where the value came from: `(from file)`, or the variable's name. Write a whole number, e.g. `cache_ms: 500`. Environment variables are strings, so `SLUICE_MOUNT_CACHE_MS=500` works, but write digits only: since sluice moved to interpose (design 0003), `SLUICE_MOUNT_CACHE_MS=1_000` is refused.
 
 ### `error: mount.point: expected str, got ['a']` (or another text setting)
 
@@ -79,6 +79,14 @@ A variable in the `env.expose` allowlist isn't set in sluice's environment. Set 
 ### Every access returns `Input/output error`
 
 A middleware, `param()` callback or virtual handler raised something other than `FsError`, `Deny` or an `OSError` with a kernel errno. sluice logs it at ERROR, with a traceback and the call's correlation id (`[1f]`), and returns `EIO`. A `post` hook that raises always gives `EIO`: it fails closed.
+
+### `Input/output error` and `<Middleware>.pre timed out after 0.5s` in the log
+
+`pipeline.timeout_ms` is set and that hook ran longer: it was cancelled and the call failed with `EIO`, as it would for any hook failure (`... ; ignored` for a `failed` hook, which can't change the outcome). Find what the hook waits on (a remote service, a slow backend), or raise the limit. A hook that is cancelled often must be cancel-safe and must not swallow `CancelledError`: see [Writing an App](Writing-an-App#timeouts-and-cancellation).
+
+### `Input/output error` on every backed path, and `backend calls abandoned after a timeout are still running` in the log
+
+Hooks timed out while their `ctx.backend` calls were running, and those calls haven't returned: their threads are stuck, typically on a hung network mount under the backend. Once `backend.max_abandoned` of them are stuck, sluice fails every new backend call at once with `EIO` rather than queue it behind them; `abandoned backend calls down to N: accepting backend calls again` follows when they return. With metrics on, `sluice_backend_abandoned` shows how many are stuck now. Fix the backend (remount the stale NFS share); if healthy backends need more room meanwhile, raise `io.threads`.
 
 ### Reads of a file a hook serves return `Input/output error`
 

@@ -27,6 +27,8 @@ def test_keys_and_variables_are_unchanged() -> None:
         ("env.expose", "SLUICE_ENV_EXPOSE"),
         ("secrets.dir", "SLUICE_SECRETS_DIR"),
         ("pipeline.slow_ms", "SLUICE_PIPELINE_SLOW_MS"),
+        ("pipeline.timeout_ms", "SLUICE_PIPELINE_TIMEOUT_MS"),
+        ("backend.max_abandoned", "SLUICE_BACKEND_MAX_ABANDONED"),
         ("metrics.enabled", "SLUICE_METRICS_ENABLED"),
     ]
     assert CONFIG_ENV == "SLUICE_CONFIG"
@@ -48,6 +50,8 @@ def test_defaults_when_no_file(tmp_path: Path) -> None:
     assert cfg.env_expose == ()
     assert cfg.secrets_dir == Path("/run/secrets")
     assert cfg.pipeline_slow_ms == 0
+    assert cfg.pipeline_timeout_ms == 0  # off (design 0006)
+    assert cfg.backend_max_abandoned == 0  # half of io.threads
     assert cfg.metrics_enabled is False
     assert set(cfg.sources.values()) == {"default"}
 
@@ -150,6 +154,13 @@ def test_env_expose_refuses_bad_names(tmp_path: Path) -> None:
     [
         ("SLUICE_MOUNT_CACHE_MS", "-1", r"mount\.cache_ms: must be 0 or more, got -1"),
         ("SLUICE_PIPELINE_SLOW_MS", "-5", r"pipeline\.slow_ms: must be 0 or more, got -5"),
+        ("SLUICE_PIPELINE_TIMEOUT_MS", "-1", r"pipeline\.timeout_ms: must be 0 or more, got -1"),
+        ("SLUICE_PIPELINE_TIMEOUT_MS", "1.5", r"pipeline\.timeout_ms: expected int"),
+        (
+            "SLUICE_BACKEND_MAX_ABANDONED",
+            "-1",
+            r"backend\.max_abandoned: must be 0 or more, got -1",
+        ),
         ("SLUICE_IO_THREADS", "0", r"io\.threads: must be greater than 0, got 0"),
         ("SLUICE_IO_THREADS", "many", r"io\.threads: expected int"),
     ],
@@ -163,3 +174,24 @@ def test_numeric_limits_accept_the_boundary(tmp_path: Path) -> None:
     env = {"SLUICE_MOUNT_CACHE_MS": "0", "SLUICE_PIPELINE_SLOW_MS": "0", "SLUICE_IO_THREADS": "1"}
     cfg = load_config(tmp_path / "m.yaml", environ=env)
     assert (cfg.mount_cache_ms, cfg.pipeline_slow_ms, cfg.io_threads) == (0, 0, 1)
+
+
+def test_timeout_and_abandoned_cap(tmp_path: Path) -> None:
+    env = {
+        "SLUICE_PIPELINE_TIMEOUT_MS": "250",
+        "SLUICE_IO_THREADS": "4",
+        "SLUICE_BACKEND_MAX_ABANDONED": "4",
+    }
+    cfg = load_config(tmp_path / "m.yaml", environ=env)
+    assert (cfg.pipeline_timeout_ms, cfg.io_threads, cfg.backend_max_abandoned) == (250, 4, 4)
+
+
+def test_abandoned_cap_is_at_most_the_pool(tmp_path: Path) -> None:
+    # A cap above the pool size is never reached: every thread would be stuck first.
+    env = {"SLUICE_IO_THREADS": "2", "SLUICE_BACKEND_MAX_ABANDONED": "3"}
+    match = (
+        r"backend\.max_abandoned: must be at most io\.threads \(2\), got 3"
+        r" \(from SLUICE_BACKEND_MAX_ABANDONED\)"
+    )
+    with pytest.raises(ConfigError, match=match):
+        load_config(tmp_path / "m.yaml", environ=env)

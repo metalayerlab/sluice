@@ -20,6 +20,8 @@ sluice is a lab project, and sluice ships the hook points for policy, not a poli
 
 **Metrics** (`metrics.enabled`, off by default) are readable by anyone who can read the mount and passes your global middleware, which runs on `/.sluice/metrics` like any path. They show call volumes, errnos, durations and middleware names, never a path, a param value or a user.
 
+**Timeouts fail closed.** With `pipeline.timeout_ms`, an authorisation hook that doesn't answer in time denies the call (`EIO`); it never lets it through. A hook that swallows `CancelledError` defeats this: it runs on, and its eventual answer counts.
+
 **Out of scope in phase 1:** real authentication, rate limiting, auditing beyond the access log, and protection against a malicious backend.
 
 ## Secrets

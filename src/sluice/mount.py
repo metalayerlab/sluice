@@ -34,7 +34,11 @@ def prepare(cfg: Config) -> RouteTable:
     """Import the app, load `MountConfig` and freeze the routes: what every command needs."""
     app = load_app(cfg.app_module, cfg.app_dir)
     mount_config = load_mount_config(cfg)
-    table = app.freeze(mount_config, metrics=Metrics() if cfg.metrics_enabled else None)
+    table = app.freeze(
+        mount_config,
+        metrics=Metrics() if cfg.metrics_enabled else None,
+        timeout_ms=cfg.pipeline_timeout_ms,
+    )
     if mount_config.secret:
         log.info("secrets loaded: %s", ", ".join(sorted(mount_config.secret)))
     return table
@@ -83,7 +87,7 @@ def serve(cfg: Config) -> None:
     except ImportError as e:
         raise MountError(f"pyfuse3 is not installed ({e}): install sluice[fuse]") from e
 
-    io = Passthrough(cfg.io_threads)
+    io = Passthrough(cfg.io_threads, cfg.backend_max_abandoned, table.metrics)
     ops = SluiceOperations(Dispatcher(table, io), cfg.mount_cache_ms / 1000)
     pyfuse3.asyncio.enable()
     try:

@@ -59,14 +59,19 @@ class Sluice:
         return self._root
 
     def freeze(
-        self, config: MountConfig | None = None, *, metrics: Metrics | None = None
+        self,
+        config: MountConfig | None = None,
+        *,
+        metrics: Metrics | None = None,
+        timeout_ms: int = 0,
     ) -> RouteTable:
         """Validate the route tree (raising `RouteError`) and freeze it.
 
         `metrics` (the mount's, when `metrics.enabled` is on) adds `/.sluice/metrics`.
+        `timeout_ms` (`pipeline.timeout_ms`; 0, the default, is none) bounds each hook call.
         """
         return compile_table(
-            self._root, list(self._params.values()), config or MountConfig(), metrics
+            self._root, list(self._params.values()), config or MountConfig(), metrics, timeout_ms
         )
 
 
