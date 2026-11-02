@@ -1,6 +1,6 @@
 # Written by Copier: never edit by hand. `copier update` reads it to know
 # which template version and answers this project was made from.
-_commit: v2.0.5
+_commit: v2.0.6
 _src_path: gh:andronics/template-base
 code_owners: '@metalayerlab/maintainers'
 dependabot_automerge: 'off'

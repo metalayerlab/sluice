@@ -3,10 +3,12 @@
 # and can be reverted on its own. Base first, then the stack overlay, then feature
 # overlays by name. Conflicts are left inline as <<<<<<< markers, listed in the PR.
 #
-# Uses the release GitHub App when RELEASE_APP_CLIENT_ID is set (so CI runs on
-# the PR, a private template can be read, and workflow files can be pushed).
-# GITHUB_TOKEN can't push changes to .github/workflows/, so without the App an
-# update that touches them opens an issue asking for a local `copier update`.
+# The token, best first: the pin-bump GitHub App when PIN_BUMP_APP_CLIENT_ID is set
+# (it has the workflows permission), else the release App when RELEASE_APP_CLIENT_ID
+# is set, else GITHUB_TOKEN. An App's PR runs CI, and an App can read a private
+# template. Only the first can push a change to .github/workflows/: with the others,
+# an update that touches them opens an issue asking for a local `copier update`, and
+# so does a push or PR that fails anyway.
 name: Template update
 
 on:
@@ -47,8 +49,21 @@ jobs:
       matrix:
         answers: ${{ fromJSON(needs.plan.outputs.templates) }}
     steps:
-      - id: app-token
-        if: vars.RELEASE_APP_CLIENT_ID != ''
+      # An App with the workflows permission (the pin-bump App, template-base's decision 0002).
+      - id: workflows-app
+        if: vars.PIN_BUMP_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.PIN_BUMP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PIN_BUMP_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      # Else the release App, taken to lack the workflows permission: it may move tags, so it stays narrow.
+      - id: release-app
+        if: vars.PIN_BUMP_APP_CLIENT_ID == '' && vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
@@ -58,15 +73,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          token: ${{ steps.app-token.outputs.token || github.token }}
+          token: ${{ steps.workflows-app.outputs.token || steps.release-app.outputs.token || github.token }}
 
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
       - name: copier update
         env:
           ANSWERS: ${{ matrix.answers }}
-          TOKEN: ${{ steps.app-token.outputs.token || github.token }}
-          HAS_APP: ${{ steps.app-token.outcome == 'success' }}
+          TOKEN: ${{ steps.workflows-app.outputs.token || steps.release-app.outputs.token || github.token }}
         run: |
           git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
           git config --global user.name "github-actions[bot]"
@@ -82,9 +96,6 @@ jobs:
             echo "TEMPLATE=${name}"
             echo "FROM=${before#_commit: }"
             echo "TO=${after#_commit: }"
-            if [ "$HAS_APP" != true ] && [ -n "$(git status --porcelain .github/workflows)" ]; then
-              echo "NEEDS_LOCAL=1"
-            fi
           } >> "$GITHUB_ENV"
 
       # After the merge, so the project's edits are already in: every template's
@@ -114,6 +125,25 @@ jobs:
             } >> "$GITHUB_ENV"
           fi
 
+      # Decided up front from the token, not from a refused push: everything the PR
+      # would commit is in the working tree by now.
+      - name: Can the token push this update?
+        env:
+          PUSHER: ${{ steps.workflows-app.outcome == 'success' && 'workflows-app' || steps.release-app.outcome == 'success' && 'release-app' || 'github-token' }}
+        run: |
+          case "$PUSHER" in
+            workflows-app) exit 0 ;;
+            release-app) who="the release GitHub App, without the \`workflows\` permission," ;;
+            *) who="\`GITHUB_TOKEN\`" ;;
+          esac
+          if [ -n "$(git status --porcelain -- .github/workflows)" ]; then
+            echo "::notice::this update changes .github/workflows/, which ${who} can't push: opening an issue instead"
+            {
+              echo "NEEDS_LOCAL=1"
+              echo "WHY_LOCAL=changes \`.github/workflows/\`, which ${who} can't push."
+            } >> "$GITHUB_ENV"
+          fi
+
       # Copier copies files, not labels; the issue and the PR below need this one.
       - name: The template-update label exists
         env:
@@ -122,22 +152,14 @@ jobs:
           gh label create template-update --force
           --color C5DEF5 --description "copier update from a template"
 
-      - name: Ask for a local update (no App, workflow files changed)
-        if: env.NEEDS_LOCAL == '1'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ANSWERS: ${{ matrix.answers }}
-        run: |
-          title="chore: update from ${TEMPLATE} ${TO} (run locally)"
-          body="${TEMPLATE} **${FROM}** → **${TO}** changes \`.github/workflows/\`, which \`GITHUB_TOKEN\` can't push. Run \`uvx copier update -a ${ANSWERS} --trust --skip-tasks --conflict inline\` then \`sh scripts/post-update.sh\` locally and open the PR, or set up the release GitHub App."
-          n=$(gh issue list --label template-update --state open --search "in:title ${TEMPLATE}" --json number -q '.[0].number')
-          if [ -n "$n" ]; then gh issue edit "$n" --title "$title" --body "$body"
-          else gh issue create --label template-update --title "$title" --body "$body"; fi
-
-      - if: env.NEEDS_LOCAL != '1'
+      # If the push is refused (or the PR fails to open) all the same, the next
+      # step opens the issue: the job never ends with no PR and no issue.
+      - id: pr
+        if: env.NEEDS_LOCAL != '1'
+        continue-on-error: true
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
-          token: ${{ steps.app-token.outputs.token || github.token }}
+          token: ${{ steps.workflows-app.outputs.token || steps.release-app.outputs.token || github.token }}
           branch: chore/${{ env.TEMPLATE }}-update
           delete-branch: true
           commit-message: "chore: update from ${{ env.TEMPLATE }} ${{ env.TO }}"
@@ -154,3 +176,21 @@ jobs:
             - Search the diff for `<<<<<<<`: conflicts are left inline for you to resolve.
             - Read the template's release notes for what changed and why.
             - Only the files this template owns change; files the project owns are never touched.
+
+      - name: Ask for a local update
+        if: env.NEEDS_LOCAL == '1' || steps.pr.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANSWERS: ${{ matrix.answers }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PR_FAILED: ${{ steps.pr.outcome == 'failure' }}
+        run: |
+          if [ "$PR_FAILED" = true ]; then
+            echo "::warning::the update couldn't be pushed or its PR opened: opening an issue instead"
+            WHY_LOCAL="couldn't be pushed or its PR opened (see [the run](${RUN})). GitHub refuses a change to \`.github/workflows/\` from a token without the \`workflows\` permission."
+          fi
+          title="chore: update from ${TEMPLATE} ${TO} (run locally)"
+          body="${TEMPLATE} **${FROM}** → **${TO}** ${WHY_LOCAL} Run \`uvx copier update -a ${ANSWERS} --trust --skip-tasks --conflict inline\` then \`sh scripts/post-update.sh\` locally and open the PR, or give this repository a GitHub App with the \`workflows\` permission (the variable \`PIN_BUMP_APP_CLIENT_ID\` and the secret \`PIN_BUMP_APP_PRIVATE_KEY\`)."
+          n=$(gh issue list --label template-update --state open --search "in:title ${TEMPLATE}" --json number -q '.[0].number')
+          if [ -n "$n" ]; then gh issue edit "$n" --title "$title" --body "$body"
+          else gh issue create --label template-update --title "$title" --body "$body"; fi
