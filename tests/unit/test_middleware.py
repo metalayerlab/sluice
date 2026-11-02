@@ -1,7 +1,9 @@
 import asyncio
+import contextlib
 import errno
 import socket
 import ssl
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -803,3 +805,41 @@ def test_repeated_middleware_keep_separate_timings_and_metric_series() -> None:
     assert set(seconds) == {"Slow", "Slow#2"}
     assert seconds["Slow#2"] >= 0.03 > seconds["Slow"]
     assert 'sluice_middleware_seconds_total{middleware="Slow#2"}' in metrics.render().decode()
+
+
+# interpose 0.1.4: a result that comes back after the limit is a timeout too (design 0006)
+
+
+@pytest.mark.parametrize(
+    ("late", "why"),
+    [
+        ("swallowed", "it swallowed the cancellation"),
+        ("overran", "it blocked the event loop past the limit"),
+    ],
+)
+def test_a_late_result_fails_closed_and_says_why(
+    late: str, why: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    class Late(Middleware):
+        def __repr__(self) -> str:
+            return "Late"
+
+        async def pre(self, ctx: Context) -> None:
+            if late == "overran":
+                time.sleep(0.05)  # Blocks the loop: the cancellation has nowhere to land
+                return
+            with contextlib.suppress(asyncio.CancelledError):  # What a hook must never do
+                await asyncio.sleep(10)
+
+    ran: list[str] = []
+
+    async def op(ctx: Context) -> bytes:
+        ran.append("op")
+        return b"data"
+
+    with pytest.raises(FsError) as e:
+        run(context(timed(Late())), op)
+    assert e.value.errno == errno.EIO
+    assert ran == []  # the late result is discarded, never acted on
+    expected = f"read /t/alice/T0k/f: Late.pre timed out after 0.02s ({why}) [c1]"
+    assert expected in [r.getMessage() for r in caplog.records]

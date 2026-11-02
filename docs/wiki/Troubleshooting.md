@@ -82,7 +82,7 @@ A middleware, `param()` callback or virtual handler raised something other than 
 
 ### `Input/output error` and `<Middleware>.pre timed out after 0.5s` in the log
 
-`pipeline.timeout_ms` is set and that hook ran longer: it was cancelled and the call failed with `EIO`, as it would for any hook failure (`... ; ignored` for a `failed` hook, which can't change the outcome). Find what the hook waits on (a remote service, a slow backend), or raise the limit. A hook that is cancelled often must be cancel-safe and must not swallow `CancelledError`: see [Writing an App](Writing-an-App#timeouts-and-cancellation).
+`pipeline.timeout_ms` is set and that hook ran longer: it was cancelled and the call failed with `EIO`, as it would for any hook failure (`... ; ignored` for a `failed` hook, which can't change the outcome). Find what the hook waits on (a remote service, a slow backend), or raise the limit. `(it swallowed the cancellation)` after the limit means the hook caught `CancelledError` and returned late; `(it blocked the event loop past the limit)` means it ran synchronous code (`time.sleep`, blocking I/O) that the cancellation couldn't interrupt. Fix the hook in both cases: its late result is discarded. A hook that is cancelled often must be cancel-safe and must not swallow `CancelledError`: see [Writing an App](Writing-an-App#timeouts-and-cancellation).
 
 ### `Input/output error` on every backed path, and `backend calls abandoned after a timeout are still running` in the log
 
