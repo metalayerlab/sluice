@@ -9,7 +9,8 @@ from typing import Any
 import pytest
 
 from sluice import Context, Deny, FsError, Middleware, MountConfig, Sluice
-from sluice.middleware import POLICY, policy, run_pipeline
+from sluice.metrics import Metrics
+from sluice.middleware import POLICY, as_middleware, policy, run_pipeline
 from sluice.routing import RouteTable
 
 
@@ -503,8 +504,10 @@ def test_pipeline_is_frozen_per_route_and_shares_inherited_entries() -> None:
     # The child's chain reuses its ancestors' entries: one entry per registration.
     assert private.pipeline.entries[:2] == a.pipeline.entries
     assert [e.middleware for e in private.pipeline.entries] == list(private.middlewares)
-    # Named as `sluice routes` and the logs name them.
-    assert [e.name for e in private.pipeline.entries] == [repr(m) for m in private.middlewares]
+    # Named as `sluice routes` and the logs name them; a repeated name gets "#2" (design 0007).
+    gate_name, r, p = (repr(m) for m in private.middlewares)
+    assert r == p == "Recorder"
+    assert [e.name for e in private.pipeline.entries] == [gate_name, "Recorder", "Recorder#2"]
     assert all(e.on_error is None and e.timeout is None for e in private.pipeline.entries)
 
 
@@ -728,3 +731,75 @@ def test_a_failed_hook_that_times_out_is_ignored(caplog: pytest.LogCaptureFixtur
         run(context(timed(SlowObserver())), op)
     assert e.value.errno == errno.ENOSPC  # the outcome was already fixed
     assert "SlowObserver.failed timed out after 0.02s [c1]; ignored" in caplog.text
+
+
+# Distinct names for repeated middleware in one chain (design 0007)
+
+
+def test_repeated_names_in_a_chain_get_a_number() -> None:
+    async def gate(ctx: Context) -> None:
+        return None
+
+    app = Sluice()
+    app.use(gate)
+    home = app.route("/h/{user}", backend="/srv/{user}", middlewares=[gate, Recorder("a", [])])
+    home.route("deep", middlewares=[gate, Recorder("b", []), Recorder("c", [])])
+    app.route("/o/{x}", backend="/srv/o", middlewares=[Recorder("d", [])])
+    table = app.freeze()
+    g = repr(as_middleware(gate, "test"))
+    deep, other = table.resolve("/h/a/deep/f"), table.resolve("/o/x/f")
+    home_res = table.resolve("/h/a/f")
+    assert deep is not None and other is not None and home_res is not None
+    assert [e.name for e in home_res.pipeline.entries] == [g, f"{g}#2", "Recorder"]
+    assert [e.name for e in deep.pipeline.entries] == [
+        g,
+        f"{g}#2",
+        "Recorder",
+        f"{g}#3",
+        "Recorder#2",
+        "Recorder#3",
+    ]
+    # Ancestors' entries keep their names; another chain starts again at the plain name.
+    assert deep.pipeline.entries[:3] == home_res.pipeline.entries
+    assert [e.name for e in other.pipeline.entries] == [g, "Recorder"]
+
+
+def test_a_numbered_name_already_taken_is_skipped() -> None:
+    class Named(Middleware):
+        def __init__(self, name: str) -> None:
+            self.label = name
+
+        def __repr__(self) -> str:
+            return self.label
+
+        async def pre(self, ctx: Context) -> None:
+            return None
+
+    table = make(Named("x"), Named("x#2"), Named("x"))
+    res = table.resolve("/t/a/T/f")
+    assert res is not None
+    assert [e.name for e in res.pipeline.entries] == ["x", "x#2", "x#3"]
+
+
+def test_repeated_middleware_keep_separate_timings_and_metric_series() -> None:
+    class Slow(Middleware):
+        def __init__(self, seconds: float) -> None:
+            self.seconds = seconds
+
+        def __repr__(self) -> str:
+            return "Slow"
+
+        async def pre(self, ctx: Context) -> None:
+            await asyncio.sleep(self.seconds)
+
+    metrics = Metrics()
+    app = Sluice()
+    app.route("/t/{user}/{token}", backend="/b/{user}", middlewares=[Slow(0), Slow(0.03)])
+    table = app.freeze(metrics=metrics)
+    # The declared label set holds the numbered name, so counting it can't be refused.
+    assert {"Slow", "Slow#2"} <= metrics.middleware.values
+    assert run(context(table)) == b"data"
+    seconds = {values[0]: value for values, value in metrics.middleware_seconds.samples().items()}
+    assert set(seconds) == {"Slow", "Slow#2"}
+    assert seconds["Slow#2"] >= 0.03 > seconds["Slow"]
+    assert 'sluice_middleware_seconds_total{middleware="Slow#2"}' in metrics.render().decode()

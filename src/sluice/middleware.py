@@ -18,7 +18,7 @@ import inspect
 import logging
 import socket
 import ssl
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -128,13 +128,20 @@ def policy(timeout_ms: int = 0) -> Policy:
     return replace(POLICY, timeout=timeout_ms / 1000) if timeout_ms else POLICY
 
 
-def entry(mw: Middleware) -> MwEntry:
+def entry(mw: Middleware, taken: Collection[str] = ()) -> MwEntry:
     """One registration of a middleware in the route tree, built once at freeze time.
 
     Named by its `repr`, the name `sluice routes` and the logs already use (a class name, or a
     plain function's qualified name). No per-middleware `on_error` or timeout: the project's.
+    `taken` are the names already in the chain: a second `auth` is `auth#2`, a third `auth#3`,
+    so each keeps its own timings and metric series (design 0007).
     """
-    return Entry(mw, repr(mw) or type(mw).__name__)
+    base = repr(mw) or type(mw).__name__
+    name, n = base, 1
+    while name in taken:
+        n += 1
+        name = f"{base}#{n}"
+    return Entry(mw, name)
 
 
 def pipeline(entries: Sequence[MwEntry], rules: Policy = POLICY) -> MwPipeline:

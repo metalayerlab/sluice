@@ -67,7 +67,7 @@ With `metrics.enabled: true`, `cat <mount.point>/.sluice/metrics` prints Prometh
 | `sluice_backend_abandoned` (gauge) | | Those still running now |
 | `sluice_backend_refused_total` | | Backend calls failed with `EIO` because `backend.max_abandoned` were still running |
 
-`op` is one of the operations middleware sees (`forget`, `release` and `releasedir` aren't counted), and `middleware` is the name `sluice routes` prints. No label ever holds a path, a route param or a user: per-path detail is what an access-log middleware is for. A denial counts as an error of its call, not as a middleware failure.
+`op` is one of the operations middleware sees (`forget`, `release` and `releasedir` aren't counted), and `middleware` is the name `sluice routes` prints; when one call's chain has the same name more than once (a middleware registered globally and on a route, two instances of one class), the second is `name#2`, the third `name#3`, and so on, each with its own series. No label ever holds a path, a route param or a user: per-path detail is what an access-log middleware is for. A denial counts as an error of its call, not as a middleware failure.
 
 ## Secrets
 
