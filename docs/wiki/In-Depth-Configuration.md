@@ -61,7 +61,7 @@ With `metrics.enabled: true`, `cat <mount.point>/.sluice/metrics` prints Prometh
 |---|---|---|
 | `sluice_call_duration_seconds` (histogram) | `op` | Every filesystem call, failed ones included (not one the kernel cancelled); `_count` is the number of calls |
 | `sluice_call_errors_total` | `op`, `errno` | Failed calls by the errno the caller got (`ENOENT`, `EACCES`, ...; `unknown` for a number outside the errno table) |
-| `sluice_middleware_seconds_total` | `middleware` | Seconds spent in each middleware's hooks; only hooks it overrides are called and timed, so a middleware has no series until one of them has run |
+| `sluice_middleware_seconds_total` | `middleware` | Seconds spent in each middleware's hooks |
 | `sluice_middleware_failures_total` | `middleware`, `hook` | `pre` and `post` hooks that raised something other than `FsError`/`Deny` or timed out, and `failed` hooks that raised anything |
 | `sluice_backend_abandoned_total` | | Backend calls left running in an I/O thread after a timeout cancelled their hook |
 | `sluice_backend_abandoned` (gauge) | | Those still running now |
