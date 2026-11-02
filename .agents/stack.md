@@ -38,7 +38,7 @@ Python >= 3.13 with uv: always `uv run`, never `pip install` or activate the ven
 
 - **Types:** full annotations, `mypy --strict`. A `# type: ignore` or `noqa` states its reason.
 - **Style:** ruff (line length 100). Comments say *why*. No `print`: `logging`; only the CLI writes stdout (`typer.echo`).
-- **Config:** every setting through `config.SETTINGS`: `SLUICE_<KEY>_FILE` > `SLUICE_<KEY>` > file > default. Secrets: `secret=True`, from `_FILE`, never logged.
+- **Config:** every setting through `config.SETTINGS`: `SLUICE_<KEY>_FILE` > `SLUICE_<KEY>` > file > default. Secrets: `secret=True`, from `_FILE`, never logged. A secret is a `Secret`: `.reveal()` where it's used; `str()` gives `********`.
 - **Errors:** specific exceptions; the CLI prints one line and exits 2. No bare `except:`.
 - **Dependencies:** only when the stdlib or an existing one can't; justify it, and check the name exists.
 - **Tests:** each behaviour change gets a test that fails without it; no network in unit tests.
