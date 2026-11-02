@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.3](https://github.com/metalayerlab/sluice/compare/v0.2.2...v0.2.3) (2026-11-02)
+
+
+### ✨ Features
+
+* distinct names for repeated middleware in a chain (design 0007) ([#62](https://github.com/metalayerlab/sluice/issues/62)) ([ee912fd](https://github.com/metalayerlab/sluice/commit/ee912fdf331b25a6fe67ea0f7aeee07695bb2c71))
+* pipeline.timeout_ms and a cap on abandoned backend calls (design 0006) ([#61](https://github.com/metalayerlab/sluice/issues/61)) ([3be4ffe](https://github.com/metalayerlab/sluice/commit/3be4ffe429834aeaddfab5b034e5d3d6ce26bfde))
+* skip middleware hooks left as the base class's no-ops (design 0008) ([#68](https://github.com/metalayerlab/sluice/issues/68)) ([a421bba](https://github.com/metalayerlab/sluice/commit/a421bbaa61c4abdb7bb2e65a62b0e4dbd4bc5bb2))
+
 ## [0.2.2](https://github.com/metalayerlab/sluice/compare/v0.2.1...v0.2.2) (2026-11-02)
 
 
