@@ -100,15 +100,16 @@ class FunctionMiddleware(Middleware):
 # sluice's answers to interpose's pipeline questions (interpose design 0003), all today's
 # behaviour: a failing hook fails the call (with an errno, below); post hooks run in reverse,
 # also after a ctx.respond(); `failed` reaches every hook that ran, its own failure included;
-# an FsError (Deny) is a hook's answer, not a failure; a hook a middleware doesn't override isn't
-# awaited (the base class's do nothing). No timeout: that needs its own record.
+# an FsError (Deny) is a hook's answer, not a failure. No timeout: that needs its own record.
+# No `skip_inherited`: it looks at the class only, so a hook set on the instance would be
+# skipped (an authorisation `pre` among them), and a skipped `pre` isn't followed by the
+# `ctx.responded` check (design 0004).
 POLICY = Policy(
     on_error="fail",
     after_order="reverse",
     after_local=True,
     observe_failed=True,
     answers=(FsError,),
-    skip_inherited=Middleware,
 )
 
 MwEntry = Entry[Middleware]
@@ -261,8 +262,12 @@ async def run_pipeline(
             stage, observers = "param()", [*run.ran, *((e, other) for e in other_chain)]
             await run_params(other, other.resolution.param_specs)
             stage, observers = "pre", None
-            await run.before("pre", other, _pre, entries=other_chain, until=_responded(other))
-            if other.responded:
+            # Only a respond() seen after a pre hook ends the call here, as it always has: a
+            # target chain with no middleware never checks.
+            stopped = await run.before(
+                "pre", other, _pre, entries=other_chain, until=_responded(other)
+            )
+            if stopped is not None:
                 responder = other
         if responder is None:
             stage = "operation"

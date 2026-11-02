@@ -483,7 +483,7 @@ def test_policy_is_sluices_semantics() -> None:
     assert POLICY.observe_failed is True
     assert POLICY.timeout is None  # no timeout until a record decides one
     assert POLICY.answers == (FsError,)
-    assert POLICY.skip_inherited is Middleware
+    assert POLICY.skip_inherited is None  # see the two tests below
 
 
 def test_pipeline_is_frozen_per_route_and_shares_inherited_entries() -> None:
@@ -515,24 +515,59 @@ def test_the_same_middleware_twice_runs_twice() -> None:
     assert log == ["pre:t", "pre:t", "post:t", "post:t"]
 
 
-def test_hooks_a_middleware_does_not_override_are_not_awaited(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[str] = []
+def test_a_hook_set_on_the_instance_runs() -> None:
+    log: list[str] = []
 
-    async def spy(self: Middleware, ctx: Context, *rest: Any) -> Any:
-        calls.append("base hook")
-        return rest[0] if rest else None
+    async def gate(ctx: Context) -> None:
+        log.append("gate")
+        raise Deny()
 
-    for hook in ("pre", "post", "failed"):
-        monkeypatch.setattr(Middleware, hook, spy)
+    mw = Middleware()
+    mw.pre = gate  # type: ignore[method-assign]  # the instance attribute is what's tested
+    with pytest.raises(FsError) as e:
+        run(context(make(mw)))
+    assert e.value.errno == errno.EACCES
+    assert log == ["gate"]
 
-    class PreOnly(Middleware):
-        async def pre(self, ctx: Context) -> None:
-            calls.append("pre")
 
-    assert run(context(make(PreOnly(), Middleware()))) == b"data"
-    assert calls == ["pre"]
+def _responding_param(table_routes: Callable[[Sluice], None]) -> RouteTable:
+    async def answer(ctx: Context, raw: Any) -> Any:
+        ctx.respond(b"from-param")
+        return raw
+
+    app = Sluice()
+    app.param("p", answer)
+    table_routes(app)
+    return app.freeze()
+
+
+def test_a_respond_in_param_stops_after_the_first_pre() -> None:
+    log: list[str] = []
+
+    class PostOnly(Recorder):
+        pre = Middleware.pre
+
+    def routes(app: Sluice) -> None:
+        chain = [PostOnly("a", log), Recorder("b", log)]
+        app.route("/t/{p}", backend="/b", middlewares=chain)
+
+    ctx = context(_responding_param(routes), "/t/x/f")
+    assert run(ctx) == b"from-param"
+    assert log == ["post:a"]
+
+
+def test_a_respond_in_a_target_param_with_no_chain_does_not_skip_the_op() -> None:
+    def routes(app: Sluice) -> None:
+        app.route("/s", backend="/s")
+        app.route("/t/{p}", backend="/b")
+
+    table = _responding_param(routes)
+
+    async def op(ctx: Context) -> bytes:
+        return b"op"
+
+    src, dst = context(table, "/s/f", "rename"), context(table, "/t/x/f", "rename")
+    assert run(src, op, also=[dst]) == b"op"
 
 
 def test_a_pre_failure_is_logged_once(caplog: pytest.LogCaptureFixture) -> None:

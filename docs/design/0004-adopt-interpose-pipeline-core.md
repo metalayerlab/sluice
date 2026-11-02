@@ -39,17 +39,21 @@ Constraints:
       after_local=True,  # post hooks also run after a ctx.respond()
       observe_failed=True,  # failed() reaches the hook that failed too
       answers=(FsError,),  # Deny / FsError is a hook's answer, not a failure
-      skip_inherited=Middleware,  # a hook left as the base class's no-op isn't awaited
   )
   ```
 
-  No `timeout` (see [Open for Stephen](#open-for-stephen)).
+  No `timeout` (see [Open for Stephen](#open-for-stephen)). No `skip_inherited`: interpose looks the
+  hook up on the class, so a hook assigned on the instance (`mw.pre = gate`, which `as_middleware`
+  accepts) would never run, failing open; and a skipped `pre` isn't followed by the `until` check, so
+  a `ctx.respond()` made in a `param()` callback would let later `pre` hooks run. Every hook is
+  awaited, as today.
 - **Frozen per route.** `compile_table` gives every route `Node` a `Pipeline` of the full chain from the
   root, global middleware first, and `Resolution.pipeline` is the matched node's. One `Entry` per
   registration, built once and shared with the descendants, so the same middleware object registered
   twice is two entries (it runs twice, as today). Nothing about the chain is built per call.
-- **Names.** An entry is named by the middleware's `repr`: what `sluice routes`, `sluice resolve` and
-  the logs already print (the class name, or a plain function's qualified name). interpose's default
+- **Names.** An entry is named by the middleware's `repr`, taken once at freeze time: what `sluice
+  routes`, `sluice resolve` and the logs already print (the class name, or a plain function's
+  qualified name). interpose's default
   (`name` attribute, else class name) would rename middleware in the logs: the test suite's own
   `Recorder` has a `name` attribute that means something else. Entries are built explicitly, so a
   middleware's own `on_error` or `timeout` attribute is not read.
@@ -58,7 +62,9 @@ Constraints:
     `applies()` that raises escapes the call exactly as it does today;
   - `param()` callbacks stay sluice's (`run_params`), outside the guard;
   - pre: `run.before("pre", ctx, ..., until=ctx.responded)`, then, for `also` (rename's target), the
-    same with the other context and its chain unless a hook already responded;
+    same with the other context and its chain unless a hook already responded. As today, the target
+    side ends the call only when its `before` phase stopped (a `respond()` seen after one of its `pre`
+    hooks), while the source side checks `ctx.responded` itself;
   - post: `run.after("post", result, ...)`.
 - **Failure path.** The guard raises `HookFailed` for a hook that fails. sluice maps the hook's own
   exception (`failure.error`) through the existing `_as_fs_error`, with the stage the call was in, so an
@@ -85,6 +91,8 @@ Constraints:
 - **Log in `_as_fs_error` and in `on_failure` both.** The same failure twice. **Stop logging in the
   mapper** instead: `param()` and operation errors never reach `on_failure`, so they would need a second
   logging site anyway.
+- **`skip_inherited=Middleware`** (interpose 0003, decision 6: "no observable change"). Not so: see the
+  two cases under Decision. It would save about one guarded call per hook a middleware leaves alone.
 - **A default timeout now** (interpose's synergy note: fail closed with `ETIMEDOUT` or `EIO`). A new
   setting and a behaviour change: a call that is slow today would fail. It needs its own record.
 - **Opt-in `on_error = "skip"` per middleware now** (interpose's brief, item 7). A new public attribute
@@ -96,13 +104,14 @@ Constraints:
   timeouts become a small, separate change.
 - No observable change: the existing pipeline tests (`tests/unit/test_middleware.py`: every rule on
   every side of a two-path call, the logs) pass unmodified. New tests pin the policy, the per-route
-  freezing, entry sharing, un-overridden hooks not being awaited, one log line per failure, and the
-  `failed()` log naming its own context.
-- **Cost.** The guard times and bounds each hook. Measured on the workstation (Python 3.13, five global
-  middleware of which three override `pre` and two `post`, a no-op operation): about 22 µs per call,
-  against 5 µs before. Most of it is interpose's guard (`asyncio.timeout`, two clock reads, and the
-  `skip_inherited` check, recomputed per call). It is small next to a FUSE round trip with a worker-thread
-  syscall, but not nothing; caching the `skip_inherited` lookup per class would be interpose's fix.
+  freezing, entry sharing, a hook set on the instance, a `respond()` from a `param()` callback on
+  both sides, one log line per failure, and the `failed()` log naming its own context; each passes
+  against the old loop too.
+- **Cost.** The guard times and bounds every hook call. Measured on the workstation (Python 3.13, five
+  global middleware, a no-op operation, so ten hook calls): about 28 µs per call through
+  `run_pipeline`, against 5 µs before, roughly 2 µs per hook call, as interpose 0003 measured. Most
+  of it is the guard (`asyncio.timeout` even with no limit, two clock reads, the failure policy
+  lookups). It is small next to a FUSE round trip with a worker-thread syscall, but not nothing.
 - The guard's per-middleware `Run.timings` are now available per call, unused here; design 0005
   (metrics) uses them.
 - Rollback is reverting the change; nothing persistent depends on it.
@@ -121,11 +130,15 @@ Each is implemented with the option that keeps today's behaviour; each is revers
    would keep denials working. Recommended with the timeout record.
 3. **Names are the `repr`, not interpose's `name_of`** (decision 9 is unaffected: names needn't be
    unique). Recommended, to keep the logs and `sluice routes` consistent.
-4. **`skip_inherited=Middleware` is on** (decision 6). No observable change: the base hooks do nothing.
-   One corner: a hook assigned as an instance attribute (`self.pre = ...`) on a class that doesn't
-   override it would now be skipped; no example or test does that.
+4. **`skip_inherited` is off** (decision 6). Turning it on is not the no-op 0003 expected (instance
+   hooks skipped, `respond()` from `param()`); it would need interpose to look hooks up on the
+   instance and to check `until` after a skipped call. Recommended: leave it off; raise both in
+   interpose if the 2 µs per un-overridden hook matters.
 5. **Observers always fail open** (decision 3) and **`FsError` is an answer** (decision 4): both today's
    behaviour, kept.
 6. **`require_async` not used** (decision 5): `check_coroutine` keeps its `RouteError` message.
-7. **The per-call cost** above. Recommended: accept it, and raise caching the `skip_inherited` lookup in
-   interpose.
+7. **The per-call cost** above. Recommended: accept it. A cheaper guard (no `asyncio.timeout` when no
+   limit applies) would be an interpose change.
+8. **Names are taken once.** A middleware whose `repr` changes over time keeps its freeze-time name in
+   the `failed` log line; one whose `repr` raises now fails `freeze()` (it already broke `sluice
+   routes`). Recommended: accept.
