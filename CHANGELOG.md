@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.4](https://github.com/metalayerlab/sluice/compare/v0.2.3...v0.2.4) (2026-11-02)
+
+
+### 🐛 Bug Fixes
+
+* turn skip_inherited back off (design 0009) ([#70](https://github.com/metalayerlab/sluice/issues/70)) ([d3b8abf](https://github.com/metalayerlab/sluice/commit/d3b8abff79c24bc4ccfb211fd3346f90f14a0f6c))
+
 ## [0.2.3](https://github.com/metalayerlab/sluice/compare/v0.2.2...v0.2.3) (2026-11-02)
 
 
