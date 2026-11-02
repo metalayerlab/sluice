@@ -2,7 +2,7 @@
 
 <!-- Add a line for this record to the index in docs/design/README.md (CI checks). -->
 
-Status: Rejected (Stephen 2026-11-02)
+Status: Superseded by 0010 (Rejected, Stephen 2026-11-02)
 Date: 2026-11-02
 Authors: Stephen Cox; drafted by Claude
 

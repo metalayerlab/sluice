@@ -486,7 +486,7 @@ def test_policy_is_sluices_semantics() -> None:
     assert POLICY.observe_failed is True
     assert POLICY.timeout is None  # pipeline.timeout_ms is off by default (design 0006)
     assert POLICY.answers == (FsError,)
-    assert POLICY.skip_inherited is None  # rejected for now (design 0009)
+    assert POLICY.skip_inherited is Middleware  # designs 0008, 0010; see the tests below
 
 
 def test_pipeline_is_frozen_per_route_and_shares_inherited_entries() -> None:
@@ -845,10 +845,10 @@ def test_a_late_result_fails_closed_and_says_why(
     assert expected in [r.getMessage() for r in caplog.records]
 
 
-# Every hook is awaited, the base class's no-ops included (skip_inherited off, design 0009)
+# skip_inherited (designs 0008, 0010): hooks left as the base class's no-ops aren't called
 
 
-def test_every_middleware_that_ran_is_timed() -> None:
+def test_hooks_a_middleware_does_not_override_are_not_timed() -> None:
     class PreOnly(Middleware):
         def __repr__(self) -> str:
             return "PreOnly"
@@ -868,8 +868,8 @@ def test_every_middleware_that_ran_is_timed() -> None:
     app.route("/t/{user}/{token}", backend="/b/{user}", middlewares=[PreOnly(), FailedOnly()])
     assert run(context(app.freeze(metrics=metrics))) == b"data"
     timed = {values[0] for values in metrics.middleware_seconds.samples()}
-    # FailedOnly's pre and post are the base no-ops, awaited and timed like any hook.
-    assert timed == {"PreOnly", "FailedOnly"}
+    # FailedOnly's pre and post are the base no-ops: never called, so never timed.
+    assert timed == {"PreOnly"}
 
 
 def test_a_failed_only_middleware_still_observes_a_failure() -> None:
@@ -888,7 +888,7 @@ def test_a_failed_only_middleware_still_observes_a_failure() -> None:
 
 
 def test_a_respond_in_param_still_skips_the_operation_with_a_post_only_chain() -> None:
-    # Every pre is a no-op here; the ctx.responded check must still run after each one.
+    # Every pre is skipped here; the ctx.responded check must still run after each one.
     log: list[str] = []
 
     class PostOnly(Recorder):
