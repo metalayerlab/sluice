@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Annotated, NoReturn
 
 import typer
+from interpose.secret import MASK
 
 from sluice import __version__
 from sluice.config import CONFIG_ENV, SETTINGS, Config, ConfigError, load_config
-from sluice.context import MASK
 from sluice.errors import AppLoadError, FsError, MountError, RouteError
 from sluice.middleware import OPS
 from sluice.routing import RouteTable
@@ -95,7 +95,7 @@ def show_config(config: ConfigOption = None) -> None:
         "pipeline.slow_ms": cfg.pipeline_slow_ms,
     }
     for setting in SETTINGS:
-        shown = "********" if setting.secret else values.get(setting.key)
+        shown = MASK if setting.secret else values.get(setting.key)
         typer.echo(f"{setting.key} = {shown}  ({cfg.sources[setting.key]})")
 
 

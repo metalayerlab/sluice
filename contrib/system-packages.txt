@@ -10,4 +10,6 @@
 #   runtime: fuse3 libfuse3-3
 # pyfuse3 ships only an sdist and compiles against libfuse3; fuse3 gives fusermount3.
 build: gcc libc6-dev libfuse3-dev pkg-config
+# interpose is a git dependency (a GitHub tag, design 0003): uv needs git to fetch it.
+build: git
 runtime: fuse3

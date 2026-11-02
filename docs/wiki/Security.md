@@ -28,7 +28,7 @@ sluice is a lab project, and sluice ships the hook points for policy, not a poli
 
 sluice's own settings hold no secrets. Your app's secrets, if it has any, are files in `secrets.dir`:
 
-- Each file is one `ctx.config.secret[<name>]`, a `Secret` that prints as `********`. Only the names are logged, once at startup. They are never shown by `sluice config`, and are refused in backend templates (a rendered real path is logged).
+- Each file is one `ctx.config.secret[<name>]`, a `Secret` (from interpose) that prints as `********` in `str()`, `repr()`, f-strings and logs; `.reveal()` gives the value, and `==` compares in constant time. Only the names are logged, once at startup. They are never shown by `sluice config`, and are refused in backend templates (a rendered real path is logged).
 - What a secret grants is up to your app: a database password used by a config template, a key `verify()` checks tokens against.
 - **Rotating:** secrets are read once at mount time. Replace the file, then restart the mount (in Kubernetes, roll the pod). Open files on the old mount break at the restart.
 

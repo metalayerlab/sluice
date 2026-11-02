@@ -17,3 +17,6 @@ the team (and its AI assistants) should know at a glance.
 - Per-call env/secret resolution: I/O on every FUSE call; frozen at mount time (design 0001).
 - Built-in middleware in the package (`auth()`, `access_log()`, `hide()`, ...): policies ship as `examples/`, the package ships mechanism (design 0002).
 - `sluice.contrib` subpackage for examples: the same API-surface problem under another name (design 0002).
+- Own settings engine or `Secret` beside interpose: the copies drift; mechanism lives in interpose (design 0003).
+- Pinning interpose via `[tool.uv.sources]` only: a built wheel would look `interpose` up on PyPI (design 0003).
+- `env.expose` name rules in interpose: sluice policy, not mechanism (design 0003).

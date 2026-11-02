@@ -10,6 +10,8 @@ Every setting can be given in four places, and the first one that has it wins:
 4. the built-in default
 
 `<KEY>` is the setting's key in upper case, with the dots as underscores: `listen.port` is `SLUICE_LISTEN_PORT`.
+
+Values are checked strictly against the setting's type, and a wrong one stops sluice with a one-line error rather than being converted: a whole-number setting takes `500` but not `0.5`, `true` or `1_000` from the environment; a text setting takes a single value, not a YAML list. A `_FILE` value has its trailing whitespace (the newline) removed; leading spaces are kept. sluice gets these rules from [interpose](https://github.com/metalayerlab/interpose), the settings library it shares with other metalayerlab tools.
 `sluice config` prints the effective value of every setting and where it came from, with secrets masked.
 
 ## Settings
@@ -28,7 +30,7 @@ Generated from the code: don't edit the table, run `uv run scripts/gen-wiki.py`.
 | `mount.cache_ms` | `SLUICE_MOUNT_CACHE_MS` | `0` | Kernel entry and attribute cache lifetime, in milliseconds. Above 0, cached calls skip middleware. |
 | `mount.debug` | `SLUICE_MOUNT_DEBUG` | `False` | libfuse request tracing. Logs raw paths, including any token in them: lab use only. |
 | `io.threads` | `SLUICE_IO_THREADS` | `8` | Worker threads for backend syscalls (at least 1). |
-| `env.expose` | `SLUICE_ENV_EXPOSE` | *(none)* | Comma-separated environment variable names copied into `ctx.config.env`. Empty: none. `SLUICE_*` names are refused. |
+| `env.expose` | `SLUICE_ENV_EXPOSE` | *(empty list)* | Environment variable names copied into `ctx.config.env`. Empty: none. `SLUICE_*` names are refused. A list: YAML, or comma-separated. |
 | `secrets.dir` | `SLUICE_SECRETS_DIR` | `/run/secrets` | Each regular file in it becomes `ctx.config.secret[<filename>]` (trailing newline stripped). A missing directory means no secrets. |
 | `pipeline.slow_ms` | `SLUICE_PIPELINE_SLOW_MS` | `0` | Log a warning when a middleware or handler holds the event loop longer than this, in milliseconds. 0: off. |
 <!-- generated:end settings -->
@@ -41,7 +43,7 @@ Notes on what the table can't say:
 - **`mount.allow_other`** needs `user_allow_other` in `/etc/fuse.conf` unless sluice runs as root. Without it only the mounting user can enter the mount. With it, any local user can, and sluice still accesses the backing store with its own uid: your middleware is then the only gate. The kernel also checks the mode bits sluice reports (`default_permissions`).
 - **`mount.debug`** makes libfuse print every request to stderr, with raw paths. Tokens in paths are *not* masked there. Use it on your own machine only.
 - **`io.threads`** bounds how many backend syscalls run at once. Each one occupies a thread until the disk answers. Raise it for slow or network-backed stores with many concurrent readers.
-- **`env.expose`** is an allowlist: only these variables reach `ctx.config.env` and `{env.NAME}` in backend templates. Every name must be set when sluice starts (`env.expose: not set in the environment: X` otherwise), because templates are rendered with it. `SLUICE_*` names are refused so that sluice's own settings never leak into routes.
+- **`env.expose`** is a list: a YAML list (`expose: [REGION, HOME]`) or a comma-separated string (`SLUICE_ENV_EXPOSE=REGION,HOME`). It is an allowlist: only these variables reach `ctx.config.env` and `{env.NAME}` in backend templates. Every name must be set when sluice starts (`env.expose: not set in the environment: X` otherwise), because templates are rendered with it. `SLUICE_*` names are refused so that sluice's own settings never leak into routes.
 - **`secrets.dir`** and **`env.expose`** are read **once, at mount time**. Changing a secret file or variable takes a remount.
 - **`pipeline.slow_ms`** turns on asyncio's debug mode, which has its own overhead. Turn it on to find a blocking middleware, then off again.
 
@@ -86,7 +88,7 @@ mount:
   point: /mnt/sluice
   allow_other: true   # other containers' users reach the mount; middleware is the gate
 env:
-  expose: REGION
+  expose: [REGION]
 secrets:
   dir: /run/secrets
 ```
