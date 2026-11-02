@@ -2,7 +2,9 @@
 
 One call: `param()` callbacks → `pre` hooks (chain order) → the operation → `post` hooks
 (reverse order). `failed` hooks observe any failure. Every hook is `async`: one event loop serves
-the whole mount, so a hook that blocks stalls every call.
+the whole mount, so a hook that blocks stalls every call. With `pipeline.timeout_ms`, a hook that
+runs longer is cancelled at its current `await` (design 0006): hooks must be cancel-safe and
+never swallow `CancelledError`.
 
 The loop and the guard around each hook come from `interpose.pipeline` (design 0004), driven by
 `POLICY`: sluice's own semantics, written down. Hook names, selection by `ops`, `param()`, the
@@ -17,6 +19,7 @@ import logging
 import socket
 import ssl
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from interpose.pipeline import Entry, Failure, HookFailed, Pipeline, Policy
@@ -97,11 +100,11 @@ class FunctionMiddleware(Middleware):
         return getattr(self.fn, "__qualname__", repr(self.fn))
 
 
-# sluice's answers to interpose's pipeline questions (interpose design 0003), all today's
-# behaviour: a failing hook fails the call (with an errno, below); post hooks run in reverse,
-# also after a ctx.respond(); `failed` reaches every hook that ran, its own failure included;
-# an FsError (Deny) is a hook's answer, not a failure. No timeout: that needs its own record.
-# No `skip_inherited`: it looks at the class only, so a hook set on the instance would be
+# sluice's answers to interpose's pipeline questions (interpose design 0003): a failing hook
+# fails the call (with an errno, below); post hooks run in reverse, also after a ctx.respond();
+# `failed` reaches every hook that ran, its own failure included; an FsError (Deny) is a hook's
+# answer, not a failure. No timeout here: `pipeline.timeout_ms` sets one (`policy()`, design
+# 0006). No `skip_inherited`: it looks at the class only, so a hook set on the instance would be
 # skipped (an authorisation `pre` among them), and a skipped `pre` isn't followed by the
 # `ctx.responded` check (design 0004).
 POLICY = Policy(
@@ -116,6 +119,15 @@ MwEntry = Entry[Middleware]
 MwPipeline = Pipeline[Middleware]
 
 
+def policy(timeout_ms: int = 0) -> Policy:
+    """`POLICY` with `pipeline.timeout_ms` (0: no limit) as interpose's per-hook timeout.
+
+    A hook that runs longer is cancelled at its current `await` and fails the call with `EIO`,
+    like any other hook failure (design 0006).
+    """
+    return replace(POLICY, timeout=timeout_ms / 1000) if timeout_ms else POLICY
+
+
 def entry(mw: Middleware) -> MwEntry:
     """One registration of a middleware in the route tree, built once at freeze time.
 
@@ -125,8 +137,8 @@ def entry(mw: Middleware) -> MwEntry:
     return Entry(mw, repr(mw) or type(mw).__name__)
 
 
-def pipeline(entries: Sequence[MwEntry]) -> MwPipeline:
-    return Pipeline(entries, POLICY)
+def pipeline(entries: Sequence[MwEntry], rules: Policy = POLICY) -> MwPipeline:
+    return Pipeline(entries, rules)
 
 
 def check_coroutine(fn: object, where: str) -> None:
@@ -192,7 +204,15 @@ class _Report:
     def __call__(self, failure: Failure) -> None:
         if self.metrics is not None:
             self.metrics.failure(failure)
-        if failure.action == "skip":
+        if failure.action == "skip" and failure.timed_out:
+            log.error(
+                "%s.%s timed out after %gs [%s]; ignored",
+                failure.middleware,
+                failure.hook,
+                failure.timeout,
+                self.ctx.correlation_id,
+            )
+        elif failure.action == "skip":
             log.error(
                 "%s.%s raised [%s]; ignored",
                 failure.middleware,
@@ -283,7 +303,21 @@ async def run_pipeline(
         # A hook's failure arrives as HookFailed: map what the hook raised, as if it had
         # escaped the hook, so errno mapping and its one log line are what they always were.
         cause = e.failure.error if isinstance(e, HookFailed) else e
-        error = _as_fs_error(ctx, cause, stage)
+        if isinstance(e, HookFailed) and e.failure.timed_out:
+            # Fail closed, as any other hook failure does; the traceback of a cancellation
+            # says nothing, so one line naming the hook and the limit.
+            log.error(
+                "%s %s: %s.%s timed out after %gs [%s]",
+                ctx.op,
+                ctx.display_path,
+                e.failure.middleware,
+                e.failure.hook,
+                e.failure.timeout,
+                ctx.correlation_id,
+            )
+            error = FsError(errno.EIO)
+        else:
+            error = _as_fs_error(ctx, cause, stage)
 
         async def notify(mw: Middleware, c: Context) -> None:
             report.ctx = c

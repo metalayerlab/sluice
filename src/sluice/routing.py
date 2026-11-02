@@ -29,6 +29,7 @@ from sluice.middleware import (
     check_coroutine,
     entry,
     pipeline,
+    policy,
 )
 from sluice.virtual import VirtualHandler
 
@@ -425,12 +426,15 @@ def compile_table(
     params: Sequence[ParamSpec],
     config: MountConfig,
     metrics: Metrics | None = None,
+    timeout_ms: int = 0,
 ) -> RouteTable:
     """Validate the tree under `root` and freeze it. Raises `RouteError`.
 
     With `metrics`, `/.sluice/metrics` serves them, and the app's own routes stay out of
-    `/.sluice` (design 0005).
+    `/.sluice` (design 0005). `timeout_ms` (`pipeline.timeout_ms`, 0: none) bounds every hook
+    call (design 0006).
     """
+    rules = policy(timeout_ms)
     secret = {p.name for p in params if p.secret}
     reserved: list[Route] = []
     if metrics is not None:
@@ -501,7 +505,7 @@ def compile_table(
         # first error as before pipelines existed.
         entries = (*inherited, *(entry(m) for m in node.middlewares))
         children = tuple(attach(c, entries) for c in node.children)
-        return replace(node, children=children, pipeline=pipeline(entries))
+        return replace(node, children=children, pipeline=pipeline(entries, rules))
 
     tree = attach(build(root, frozenset(), False), ())
     if metrics is not None:

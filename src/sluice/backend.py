@@ -10,20 +10,25 @@ import asyncio
 import ctypes
 import errno
 import functools
+import logging
 import os
 import stat
+import threading
 from collections.abc import Callable, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from sluice.context import Attr, DirEntry, Opened
 from sluice.errors import FsError
 
 if TYPE_CHECKING:
     from sluice.context import Context
+    from sluice.metrics import Metrics
     from sluice.routing import Resolution
+
+log = logging.getLogger(__name__)
 
 _OPEN_IGNORED = os.O_CREAT | os.O_EXCL | os.O_NOCTTY
 _WALK = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -276,14 +281,81 @@ class Passthrough:
     """The operation for backed routes, against `ctx.real_path`.
 
     Path operations never follow a symlink below the backend's literal prefix: see `_beneath`.
+
+    A call whose await is cancelled (a hook timed out, design 0006) while its syscall is already
+    running in a thread can't be stopped: the thread runs on, holding a pool slot. Those calls are
+    *abandoned*. While `max_abandoned` of them still run, new calls fail at once with `EIO`
+    instead of queueing behind them (a hung NFS mount would otherwise fill the pool, one timeout
+    at a time, until every call hangs); calls work again as the abandoned ones finish.
     """
 
-    def __init__(self, threads: int = 8) -> None:
+    def __init__(
+        self, threads: int = 8, max_abandoned: int = 0, metrics: Metrics | None = None
+    ) -> None:
         self._pool = ThreadPoolExecutor(max_workers=threads, thread_name_prefix="sluice-io")
+        # 0: half the pool, at least 1 (design 0006).
+        self.max_abandoned = max_abandoned or max(1, threads // 2)
+        self._abandoned = 0
+        self._refusing = False  # Logged once per spell at the cap
+        self._lock = threading.Lock()  # The count drops in the worker thread that finishes
+        self._metrics = metrics
+        if metrics is not None:
+            metrics.watch_backend(lambda: self.abandoned)
+
+    @property
+    def abandoned(self) -> int:
+        """Calls still running in a thread after their await was cancelled."""
+        return self._abandoned
 
     async def run[T](self, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._pool, functools.partial(fn, *args, **kwargs))
+        """Run `fn(*args, **kwargs)` in the pool. `FsError(EIO)` while the abandoned cap holds."""
+        return await self._submit(functools.partial(fn, *args, **kwargs), capped=True)
+
+    async def _submit[T](self, call: Callable[[], T], *, capped: bool) -> T:
+        if capped and self._abandoned >= self.max_abandoned:
+            self._refuse()
+        future = self._pool.submit(call)
+        try:
+            return await asyncio.wrap_future(future)
+        except asyncio.CancelledError:
+            # cancel() stops a call still queued; one already running can only be left to finish.
+            if not future.cancel():
+                self._abandon(future)
+            raise
+
+    def _refuse(self) -> NoReturn:
+        if self._metrics is not None:
+            self._metrics.backend_refused()
+        with self._lock:
+            first, self._refusing = not self._refusing, True
+        if first:
+            log.error(
+                "%d backend calls abandoned after a timeout are still running"
+                " (backend.max_abandoned=%d): failing backend calls with EIO until they finish",
+                self._abandoned,
+                self.max_abandoned,
+            )
+        raise FsError(errno.EIO, "too many abandoned backend calls")
+
+    def _abandon(self, future: Future[Any]) -> None:
+        with self._lock:
+            self._abandoned += 1
+        if self._metrics is not None:
+            self._metrics.backend_abandoned()
+        # Runs at once if the call has finished meanwhile; else in the worker thread, when it does.
+        future.add_done_callback(self._finished)
+
+    def _finished(self, _: Future[Any]) -> None:
+        with self._lock:
+            self._abandoned -= 1
+            recovered = self._refusing and self._abandoned < self.max_abandoned
+            if recovered:
+                self._refusing = False
+        if recovered:
+            log.warning(
+                "abandoned backend calls down to %d: accepting backend calls again",
+                self._abandoned,
+            )
 
     async def at[T](self, fn: Callable[..., T], res: Resolution, *args: Any) -> T:
         """Run `fn(at, *args)` in the pool, on `res.real_path` resolved beneath its prefix."""
@@ -361,7 +433,8 @@ class Passthrough:
 
     async def release(self, handle: Opened) -> None:
         if handle.fd is not None:
-            await self.run(os.close, handle.fd)
+            # Never refused at the abandoned cap: refusing a close would leak the fd.
+            await self._submit(functools.partial(os.close, handle.fd), capped=False)
 
     async def opendir(self, ctx: Context) -> Opened:
         await self.at(_opendir, ctx.resolution)

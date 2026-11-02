@@ -68,6 +68,22 @@ def test_prepare_loads_app_and_logs_secret_names(
     assert "s3cr3t" not in caplog.text
 
 
+def test_prepare_applies_pipeline_timeout_ms(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "timeoutapp.py").write_text(
+        "from sluice import Sluice\napp = Sluice()\napp.route('/x', backend='/srv')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    base = {"SLUICE_APP_MODULE": "timeoutapp:app", "SLUICE_SECRETS_DIR": str(tmp_path / "no")}
+    for value, seconds in (("0", None), ("1500", 1.5)):
+        env = base | {"SLUICE_PIPELINE_TIMEOUT_MS": value}
+        res = prepare(load_config(tmp_path / "n.yaml", environ=env)).resolve("/x/y")
+        assert res is not None
+        assert res.pipeline.policy.timeout == seconds
+
+
 def test_stopper_terminates_once() -> None:
     import asyncio
     import signal

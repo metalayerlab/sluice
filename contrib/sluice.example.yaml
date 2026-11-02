@@ -42,6 +42,13 @@ secrets:
 pipeline:
   # Warn when a middleware or handler holds the event loop longer than this (ms); 0 = off
   slow_ms: 0
+  # Cancel a middleware hook that runs longer than this (ms) and fail the call with EIO; 0 = off
+  timeout_ms: 0
+
+backend:
+  # Backend calls left running in I/O threads after a timeout, before new backend calls
+  # fail with EIO instead of queueing; at most io.threads; 0 = half of io.threads
+  max_abandoned: 0
 
 metrics:
   # Serve Prometheus metrics as the read-only file /.sluice/metrics; reserves /.sluice

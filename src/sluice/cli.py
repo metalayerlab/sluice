@@ -93,6 +93,8 @@ def show_config(config: ConfigOption = None) -> None:
         "env.expose": ",".join(cfg.env_expose),
         "secrets.dir": cfg.secrets_dir,
         "pipeline.slow_ms": cfg.pipeline_slow_ms,
+        "pipeline.timeout_ms": cfg.pipeline_timeout_ms,
+        "backend.max_abandoned": cfg.backend_max_abandoned,
         "metrics.enabled": cfg.metrics_enabled,
     }
     for setting in SETTINGS:

@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from sluice import Context, Deny, FsError, Middleware, MountConfig, Sluice
-from sluice.middleware import POLICY, run_pipeline
+from sluice.middleware import POLICY, policy, run_pipeline
 from sluice.routing import RouteTable
 
 
@@ -481,7 +481,7 @@ def test_policy_is_sluices_semantics() -> None:
     assert POLICY.after_order == "reverse"
     assert POLICY.after_local is True
     assert POLICY.observe_failed is True
-    assert POLICY.timeout is None  # no timeout until a record decides one
+    assert POLICY.timeout is None  # pipeline.timeout_ms is off by default (design 0006)
     assert POLICY.answers == (FsError,)
     assert POLICY.skip_inherited is None  # see the two tests below
 
@@ -631,3 +631,100 @@ def test_an_ops_filter_that_raises_escapes_the_call() -> None:
 
     with pytest.raises(RuntimeError, match="bad filter"):
         run(context(make(Odd())))
+
+
+# pipeline.timeout_ms (design 0006)
+
+
+def test_policy_adds_the_timeout_in_seconds_and_nothing_else() -> None:
+    assert policy(0) is POLICY
+    assert policy() is POLICY
+    timed = policy(250)
+    assert timed.timeout == 0.25
+    assert {**vars(timed), "timeout": None} == vars(POLICY)
+
+
+def test_freeze_bounds_every_pipeline_with_the_timeout() -> None:
+    app = Sluice()
+    app.use(Recorder("g", []))
+    app.route("/t/{user}", backend="/b/{user}")
+    for timeout_ms, seconds in ((0, None), (40, 0.04)):
+        res = app.freeze(timeout_ms=timeout_ms).resolve("/t/a/f")
+        assert res is not None
+        assert res.pipeline.policy.timeout == seconds
+
+
+class Stuck(Recorder):
+    """Records whether its `pre` was cancelled at its await."""
+
+    async def pre(self, ctx: Context) -> None:
+        self.log.append(f"pre:{self.name}")
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            self.log.append("cancelled")
+            raise
+
+
+def timed(*middlewares: object, timeout_ms: int = 20) -> RouteTable:
+    app = Sluice()
+    app.route("/t/{user}/{token}", backend="/b/{user}", middlewares=list(middlewares))
+    return app.freeze(timeout_ms=timeout_ms)
+
+
+def test_a_hook_that_times_out_is_cancelled_and_fails_closed_with_eio(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    log: list[str] = []
+    ran: list[str] = []
+
+    async def op(ctx: Context) -> bytes:
+        ran.append("op")
+        return b"data"
+
+    with pytest.raises(FsError) as e:
+        run(context(timed(Recorder("a", log), Stuck("s", log))), op)
+    assert e.value.errno == errno.EIO
+    assert ran == []  # the operation never runs
+    # Cancelled at its await; then `failed` reaches every hook that ran, its own included.
+    assert log == ["pre:a", "pre:s", "cancelled", "failed:s:EIO", "failed:a:EIO"]
+    # One line, naming the hook and the limit; no traceback of the cancellation.
+    lines = [r for r in caplog.records if "timed out" in r.getMessage()]
+    assert len(lines) == 1
+    assert lines[0].getMessage() == "read /t/alice/T0k/f: Stuck.pre timed out after 0.02s [c1]"
+    assert lines[0].exc_info is None
+    assert "unexpected error" not in caplog.text
+
+
+def test_a_hook_within_the_timeout_is_unaffected() -> None:
+    log: list[str] = []
+    assert run(context(timed(Recorder("a", log), timeout_ms=5000))) == b"data"
+    assert log == ["pre:a", "post:a"]
+
+
+def test_without_a_timeout_a_slow_hook_finishes() -> None:
+    class Slow(Recorder):
+        async def pre(self, ctx: Context) -> None:
+            await asyncio.sleep(0.05)
+            self.log.append("slept")
+
+    log: list[str] = []
+    assert run(context(timed(Slow("s", log), timeout_ms=0))) == b"data"
+    assert log == ["slept", "post:s"]
+
+
+def test_a_failed_hook_that_times_out_is_ignored(caplog: pytest.LogCaptureFixture) -> None:
+    class SlowObserver(Middleware):
+        def __repr__(self) -> str:
+            return "SlowObserver"
+
+        async def failed(self, ctx: Context, error: FsError) -> None:
+            await asyncio.sleep(10)
+
+    async def op(ctx: Context) -> None:
+        raise FsError(errno.ENOSPC)
+
+    with pytest.raises(FsError) as e:
+        run(context(timed(SlowObserver())), op)
+    assert e.value.errno == errno.ENOSPC  # the outcome was already fixed
+    assert "SlowObserver.failed timed out after 0.02s [c1]; ignored" in caplog.text

@@ -13,13 +13,13 @@ from __future__ import annotations
 import errno
 from typing import TYPE_CHECKING
 
-from interpose.metrics import CONTENT_TYPE, Counter, Histogram, Label, Registry
+from interpose.metrics import CONTENT_TYPE, Counter, Gauge, Histogram, Label, Registry
 
 from sluice.middleware import OPS
 from sluice.virtual import VirtualHandler
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from interpose.pipeline import Failure
 
@@ -89,12 +89,31 @@ class Metrics:
             " that raised anything.",
             [self.middleware, Label("hook", HOOKS)],
         )
+        # Design 0006: backend calls left running in a thread after a timeout cancelled them.
+        self.backend_abandoned_total = Counter(
+            "sluice_backend_abandoned_total",
+            "Backend calls whose await was cancelled (a hook timed out) while the call was"
+            " already running in an I/O thread, which it keeps until the call returns.",
+        )
+        self.backend_abandoned_now = Gauge(
+            "sluice_backend_abandoned",
+            "Abandoned backend calls still running in an I/O thread.",
+            read=lambda: {(): 0.0},
+        )
+        self.backend_refused_total = Counter(
+            "sluice_backend_refused_total",
+            "Backend calls failed with EIO without running, because backend.max_abandoned"
+            " abandoned calls were still running.",
+        )
         self.registry = Registry(
             [
                 self.call_duration,
                 self.call_errors,
                 self.middleware_seconds,
                 self.middleware_failures,
+                self.backend_abandoned_total,
+                self.backend_abandoned_now,
+                self.backend_refused_total,
             ]
         )
 
@@ -111,6 +130,16 @@ class Metrics:
         """One call's time in each middleware (interpose's `Run.timings`)."""
         for name, seconds in timings.items():
             self.middleware_seconds.inc(name, amount=seconds)
+
+    def watch_backend(self, abandoned: Callable[[], int]) -> None:
+        """Read the mount's abandoned-call count when the metrics render."""
+        self.backend_abandoned_now.read = lambda: {(): float(abandoned())}
+
+    def backend_abandoned(self) -> None:
+        self.backend_abandoned_total.inc()
+
+    def backend_refused(self) -> None:
+        self.backend_refused_total.inc()
 
     def failure(self, failure: Failure) -> None:
         self.middleware_failures.inc(failure.middleware, failure.hook)

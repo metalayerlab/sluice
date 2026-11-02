@@ -140,6 +140,21 @@ SETTINGS = Settings(
             check=non_negative,
         ),
         Setting(
+            "pipeline.timeout_ms",
+            0,
+            "Fail a call with `EIO` when one middleware hook runs longer than this, in"
+            " milliseconds; the hook is cancelled at its current `await`. 0: off.",
+            check=non_negative,
+        ),
+        Setting(
+            "backend.max_abandoned",
+            0,
+            "How many backend calls cancelled by a timeout may still be running in I/O threads"
+            " before new backend calls fail with `EIO` instead of queueing. At most `io.threads`;"
+            " 0: half of `io.threads`, at least 1.",
+            check=non_negative,
+        ),
+        Setting(
             "metrics.enabled",
             False,
             "Serve Prometheus metrics as the read-only file `/.sluice/metrics` in the mount, and"
@@ -165,6 +180,8 @@ class Config:
     env_expose: tuple[str, ...] = ()
     secrets_dir: Path = Path("/run/secrets")
     pipeline_slow_ms: int = 0
+    pipeline_timeout_ms: int = 0
+    backend_max_abandoned: int = 0
     metrics_enabled: bool = False
     # Setting key -> where its value came from ("default", "file", an env var name).
     sources: Mapping[str, str] = field(default_factory=dict)
@@ -174,7 +191,13 @@ def load_config(path: Path | None = None, environ: Mapping[str, str] | None = No
     """Load the configuration. A missing config file is not an error: defaults apply."""
     r = SETTINGS.resolve(path, environ)
     v = r.values
-    # No rule spans settings yet; one would go here, after resolve().
+    threads, abandoned = cast(int, v["io.threads"]), cast(int, v["backend.max_abandoned"])
+    if abandoned > threads:
+        # More than the pool holds: the pool would be full before the cap is ever reached.
+        raise ConfigError(
+            f"backend.max_abandoned: must be at most io.threads ({threads}), got {abandoned}"
+            f" (from {r.sources['backend.max_abandoned']})"
+        )
     return Config(
         log_level=cast(str, v["log_level"]).upper(),
         app_module=cast(str, v["app.module"]),
@@ -184,10 +207,12 @@ def load_config(path: Path | None = None, environ: Mapping[str, str] | None = No
         mount_allow_other=cast(bool, v["mount.allow_other"]),
         mount_cache_ms=cast(int, v["mount.cache_ms"]),
         mount_debug=cast(bool, v["mount.debug"]),
-        io_threads=cast(int, v["io.threads"]),
+        io_threads=threads,
         env_expose=cast(tuple[str, ...], v["env.expose"]),
         secrets_dir=Path(cast(str, v["secrets.dir"])),
         pipeline_slow_ms=cast(int, v["pipeline.slow_ms"]),
+        pipeline_timeout_ms=cast(int, v["pipeline.timeout_ms"]),
+        backend_max_abandoned=abandoned,
         metrics_enabled=cast(bool, v["metrics.enabled"]),
         sources=dict(r.sources),
     )
