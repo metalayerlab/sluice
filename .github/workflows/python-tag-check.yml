@@ -1,0 +1,55 @@
+# Template-owned: template-python. Weekly: find dependencies pinned to a GitHub tag
+# (`NAME @ git+https://github.com/OWNER/REPO@vX.Y.Z`, or a [tool.uv.sources] `tag =`), which
+# Dependabot can't update, and open one `chore(deps)` PR per newer tag on `tag-check/NAME`
+# (scripts/tag-check.py; template-python's decision 0002). With none, it says so and exits.
+#
+# Uses the release GitHub App when RELEASE_APP_CLIENT_ID is set, so CI runs on its PRs and a
+# private dependency's tags can be read (the App must be installed on that repository).
+# With GITHUB_TOKEN, CI doesn't run on the PR: its body says so, and that closing and
+# reopening it runs CI. See the wiki's Release-Process page.
+name: Tag check
+
+on:
+  schedule:
+    # An hour before template-update.yml.
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: tag-check
+  cancel-in-progress: false
+
+jobs:
+  tag-check:
+    runs-on: ubuntu-latest
+    steps:
+      - id: app-token
+        if: vars.RELEASE_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: scripts/tag-check.py
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          RELEASE_APP_CLIENT_ID: ${{ vars.RELEASE_APP_CLIENT_ID }}
+        run: |
+          # uv lock fetches the dependency with the same token (a private one needs the App).
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python3 scripts/tag-check.py --base main

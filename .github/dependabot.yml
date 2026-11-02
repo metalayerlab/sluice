@@ -19,6 +19,10 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+    # interpose is pinned to a git tag, which Dependabot can't update: it would look the name
+    # up on PyPI instead. python-tag-check.yml bumps it (template-python decisions 0002, 0003).
+    ignore:
+      - dependency-name: interpose
     commit-message:
       prefix: chore(deps)
 
