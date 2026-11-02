@@ -33,6 +33,7 @@ Generated from the code: don't edit the table, run `uv run scripts/gen-wiki.py`.
 | `env.expose` | `SLUICE_ENV_EXPOSE` | *(empty list)* | Environment variable names copied into `ctx.config.env`. Empty: none. `SLUICE_*` names are refused. A list: YAML, or comma-separated. |
 | `secrets.dir` | `SLUICE_SECRETS_DIR` | `/run/secrets` | Each regular file in it becomes `ctx.config.secret[<filename>]` (trailing newline stripped). A missing directory means no secrets. |
 | `pipeline.slow_ms` | `SLUICE_PIPELINE_SLOW_MS` | `0` | Log a warning when a middleware or handler holds the event loop longer than this, in milliseconds. 0: off. |
+| `metrics.enabled` | `SLUICE_METRICS_ENABLED` | `False` | Serve Prometheus metrics as the read-only file `/.sluice/metrics` in the mount, and reserve `/.sluice` for sluice. Off: no file, and nothing is counted. |
 <!-- generated:end settings -->
 
 Notes on what the table can't say:
@@ -46,6 +47,20 @@ Notes on what the table can't say:
 - **`env.expose`** is a list: a YAML list (`expose: [REGION, HOME]`) or a comma-separated string (`SLUICE_ENV_EXPOSE=REGION,HOME`). It is an allowlist: only these variables reach `ctx.config.env` and `{env.NAME}` in backend templates. Every name must be set when sluice starts (`env.expose: not set in the environment: X` otherwise), because templates are rendered with it. `SLUICE_*` names are refused so that sluice's own settings never leak into routes.
 - **`secrets.dir`** and **`env.expose`** are read **once, at mount time**. Changing a secret file or variable takes a remount.
 - **`pipeline.slow_ms`** turns on asyncio's debug mode, which has its own overhead. Turn it on to find a blocking middleware, then off again.
+- **`metrics.enabled`** adds the read-only file `/.sluice/metrics` (see [Metrics](#metrics)) and reserves `/.sluice`: an app route under it is then a route error.
+
+## Metrics
+
+With `metrics.enabled: true`, `cat <mount.point>/.sluice/metrics` prints Prometheus text, rendered when the file is opened. Counting is in memory; nothing is written anywhere. Global middleware (`app.use()`) runs on the file like on any other path, so your authorisation applies to it.
+
+| Metric | Labels | What |
+|---|---|---|
+| `sluice_call_duration_seconds` (histogram) | `op` | Every filesystem call, failed ones included (not one the kernel cancelled); `_count` is the number of calls |
+| `sluice_call_errors_total` | `op`, `errno` | Failed calls by the errno the caller got (`ENOENT`, `EACCES`, ...; `unknown` for a number outside the errno table) |
+| `sluice_middleware_seconds_total` | `middleware` | Seconds spent in each middleware's hooks |
+| `sluice_middleware_failures_total` | `middleware`, `hook` | `pre` and `post` hooks that raised something other than `FsError`/`Deny`, and `failed` hooks that raised anything |
+
+`op` is one of the operations middleware sees (`forget`, `release` and `releasedir` aren't counted), and `middleware` is the name `sluice routes` prints. No label ever holds a path, a route param or a user: per-path detail is what an access-log middleware is for. A denial counts as an error of its call, not as a middleware failure.
 
 ## Secrets
 
@@ -91,6 +106,15 @@ env:
   expose: [REGION]
 secrets:
   dir: /run/secrets
+```
+
+**Metrics for Prometheus**, through node_exporter's textfile collector (copy the file on a timer; `cp` reads it in one open):
+
+```sh
+SLUICE_METRICS_ENABLED=true sluice mount
+# elsewhere, every 15 s:
+cp /mnt/sluice/.sluice/metrics /var/lib/node_exporter/textfile/sluice.prom.tmp &&
+  mv /var/lib/node_exporter/textfile/sluice.prom.tmp /var/lib/node_exporter/textfile/sluice.prom
 ```
 
 **Finding a blocking middleware**, with debug logging on:

@@ -139,6 +139,12 @@ SETTINGS = Settings(
             " in milliseconds. 0: off.",
             check=non_negative,
         ),
+        Setting(
+            "metrics.enabled",
+            False,
+            "Serve Prometheus metrics as the read-only file `/.sluice/metrics` in the mount, and"
+            " reserve `/.sluice` for sluice. Off: no file, and nothing is counted.",
+        ),
     ],
     default_path=DEFAULT_CONFIG_PATH,
 )
@@ -159,6 +165,7 @@ class Config:
     env_expose: tuple[str, ...] = ()
     secrets_dir: Path = Path("/run/secrets")
     pipeline_slow_ms: int = 0
+    metrics_enabled: bool = False
     # Setting key -> where its value came from ("default", "file", an env var name).
     sources: Mapping[str, str] = field(default_factory=dict)
 
@@ -181,5 +188,6 @@ def load_config(path: Path | None = None, environ: Mapping[str, str] | None = No
         env_expose=cast(tuple[str, ...], v["env.expose"]),
         secrets_dir=Path(cast(str, v["secrets.dir"])),
         pipeline_slow_ms=cast(int, v["pipeline.slow_ms"]),
+        metrics_enabled=cast(bool, v["metrics.enabled"]),
         sources=dict(r.sources),
     )

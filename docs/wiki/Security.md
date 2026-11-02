@@ -18,6 +18,8 @@ sluice is a lab project, and sluice ships the hook points for policy, not a poli
 
 **What an attacker gains**, if they control the app or the sluice process: everything its uid can read and write in every backend, and every secret in `secrets.dir`. If they can only call the mount: whatever your middleware lets through.
 
+**Metrics** (`metrics.enabled`, off by default) are readable by anyone who can read the mount and passes your global middleware, which runs on `/.sluice/metrics` like any path. They show call volumes, errnos, durations and middleware names, never a path, a param value or a user.
+
 **Out of scope in phase 1:** real authentication, rate limiting, auditing beyond the access log, and protection against a malicious backend.
 
 ## Secrets

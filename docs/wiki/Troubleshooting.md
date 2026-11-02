@@ -48,6 +48,10 @@ The module isn't on `sys.path`, or importing it raised the error shown. Set `app
 
 The routes don't validate. The message names the route and the problem. Fix the app, and use `sluice routes` to check it without mounting. The full list of checks is in [Writing an App](Writing-an-App#what-freeze-checks).
 
+### `error: /.sluice/...: /.sluice is reserved for sluice's own files while metrics.enabled is on`
+
+With metrics on, sluice serves `/.sluice/metrics` and keeps `/.sluice` for itself. Move the app's route elsewhere, or turn `metrics.enabled` off.
+
 ### `error: /files/{token}: backend can't use the secret param {token}`
 
 A param registered with `secret=True` is used where it would end up in a real path, which sluice logs, shows in `sluice resolve` and passes to `auth`'s `verify`. Either the route's own `backend` template uses it, or the route has no backend of its own, inherits one from an ancestor, and captures it (its segments are appended to the real path). Capture the secret on the backed route itself, or above it: `app.route("/files/{token}", backend="/srv/files")` keeps the token out of the real path. sluice 0.1.1 and earlier accepted the inherited case and leaked the value.

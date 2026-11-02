@@ -181,14 +181,17 @@ def _as_fs_error(ctx: Context, e: Exception, stage: str) -> FsError:
 
 
 class _Report:
-    """`on_failure` for one call. A failure under "fail" ends the call and is logged once, by
-    `_as_fs_error`; only one the pipeline carried on from (a `failed` hook's) is logged here,
-    with the context of the hook that raised it."""
+    """`on_failure` for one call. Every failure is counted (with metrics on). A failure under
+    "fail" ends the call and is logged once, by `_as_fs_error`; only one the pipeline carried on
+    from (a `failed` hook's) is logged here, with the context of the hook that raised it."""
 
     def __init__(self, ctx: Context) -> None:
         self.ctx = ctx
+        self.metrics = ctx.resolution.metrics
 
     def __call__(self, failure: Failure) -> None:
+        if self.metrics is not None:
+            self.metrics.failure(failure)
         if failure.action == "skip":
             log.error(
                 "%s.%s raised [%s]; ignored",
@@ -289,4 +292,7 @@ async def run_pipeline(
         pairs = None if observers is None else list(reversed(observers))
         await run.observe_ran("failed", notify, pairs=pairs)
         raise error from cause
+    finally:
+        if report.metrics is not None:
+            report.metrics.hooks(run.timings)
     return result
