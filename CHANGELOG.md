@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.2.0](https://github.com/metalayerlab/sluice/compare/v0.1.2...v0.2.0) (2026-11-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* stricter settings coercion (env ints like 1_000 refused, _FILE strips trailing whitespace only) and new error texts for YAML, type and secrets-directory errors; config keys and environment variables unchanged. See docs/design/0003.
+* move auth() and access_log() out of the package into examples/ ([#41](https://github.com/metalayerlab/sluice/issues/41))
+
+### ✨ Features
+
+* add ctx.backend and map hook oserrors to their errno ([#39](https://github.com/metalayerlab/sluice/issues/39)) ([ffd77d1](https://github.com/metalayerlab/sluice/commit/ffd77d1a597221a4ab4d89fdf7d810659cc0cfb7))
+* add the hide example (shadowfs rules as middleware) ([#43](https://github.com/metalayerlab/sluice/issues/43)) ([c87b746](https://github.com/metalayerlab/sluice/commit/c87b746118795424b1b453246802487ee340bfb7))
+* add the layers example (shadowfs views as symlinks) ([#44](https://github.com/metalayerlab/sluice/issues/44)) ([4d67860](https://github.com/metalayerlab/sluice/commit/4d678602efe157f4adba108e60b5bcbc51edfb15))
+* add the strm example (fuse-strmfs as middleware) ([#42](https://github.com/metalayerlab/sluice/issues/42)) ([f187ce6](https://github.com/metalayerlab/sluice/commit/f187ce66423e6bf1195100f31e8503fd99742642))
+* add the transform example (shadowfs transforms as middleware) ([#45](https://github.com/metalayerlab/sluice/issues/45)) ([3b46e75](https://github.com/metalayerlab/sluice/commit/3b46e75928fd9c58f3a0eeff48cf45d6038ba8c2))
+* adopt interpose for settings and secrets ([#52](https://github.com/metalayerlab/sluice/issues/52)) ([8352c53](https://github.com/metalayerlab/sluice/commit/8352c5353e2b50c4c5ed61b6e705f62c46da6ade))
+
+
+### 🐛 Bug Fixes
+
+* follow a symlinked backend prefix at the route root ([#40](https://github.com/metalayerlab/sluice/issues/40)) ([9213ef7](https://github.com/metalayerlab/sluice/commit/9213ef700cfee4ef588f4cc4b7011d7b673edcf8))
+* refuse a truncating open of a strm file ([#47](https://github.com/metalayerlab/sluice/issues/47)) ([228ca90](https://github.com/metalayerlab/sluice/commit/228ca9022a45c72808dd19c829e8011cc9383106))
+
+
+### ♻️ Refactoring
+
+* move auth() and access_log() out of the package into examples/ ([#41](https://github.com/metalayerlab/sluice/issues/41)) ([3bd2477](https://github.com/metalayerlab/sluice/commit/3bd24773d079c90b684424c44982868b722fb1db))
+
+
+### 📚 Documentation
+
+* keep middleware out of the package, add strmfs and shadowfs plan (design 0002) ([#35](https://github.com/metalayerlab/sluice/issues/35)) ([ba21b59](https://github.com/metalayerlab/sluice/commit/ba21b596cdf6f11a4140cf814aeb9e082711c1f2))
+* mark design 0002 implemented ([#46](https://github.com/metalayerlab/sluice/issues/46)) ([ae76f8d](https://github.com/metalayerlab/sluice/commit/ae76f8d19c84432e2361679cabc9eed478605776))
+* mark the container recipe verified ([#37](https://github.com/metalayerlab/sluice/issues/37)) ([63b9b84](https://github.com/metalayerlab/sluice/commit/63b9b842acaba50ac3bd04fd8200adf64f148c42))
+* track the check-wiki anchor workaround in todo ([#48](https://github.com/metalayerlab/sluice/issues/48)) ([8600a3a](https://github.com/metalayerlab/sluice/commit/8600a3aa75dd07c557e14190eb748bdd42174a8d))
+
 ## [0.1.2](https://github.com/metalayerlab/sluice/compare/v0.1.1...v0.1.2) (2026-10-31)
 
 
