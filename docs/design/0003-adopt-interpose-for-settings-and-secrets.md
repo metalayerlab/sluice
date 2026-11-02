@@ -23,8 +23,10 @@ time, never per call (TODO.md, "Decided against").
 ## Decision
 
 - **Dependency:** `interpose @ git+https://github.com/metalayerlab/interpose@v0.1.0`, a tag on GitHub,
-  never PyPI. hatchling needs `[tool.hatch.metadata] allow-direct-references = true` for it.
-  `pyyaml` stops being a direct dependency (interpose brings it; sluice no longer imports it).
+  never PyPI, as the first entry of `dependencies` in PEP 508 form (not `[tool.uv.sources]`, see
+  below). hatchling needs `[tool.hatch.metadata] allow-direct-references = true` for it. Both follow
+  template-python's decision 0003 to the letter, so its template update merges cleanly. `pyyaml` stays
+  listed, as the template keeps it.
   uv fetches a git dependency with `git`, so `contrib/system-packages.txt` adds it to `build:` (CI's
   test job and the image's builder stage; the runtime image doesn't get it).
 - **`config.py`** becomes one `SETTINGS = Settings("SLUICE_", [Setting(...), ...],

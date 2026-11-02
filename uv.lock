@@ -600,6 +600,7 @@ version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "interpose" },
+    { name = "pyyaml" },
     { name = "typer" },
 ]
 
@@ -621,6 +622,7 @@ dev = [
 requires-dist = [
     { name = "interpose", git = "https://github.com/metalayerlab/interpose?rev=v0.1.0" },
     { name = "pyfuse3", marker = "extra == 'fuse'", specifier = ">=3.5.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "typer", specifier = ">=0.15" },
 ]
 provides-extras = ["fuse"]

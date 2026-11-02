@@ -11,11 +11,14 @@ Every setting can come from four places, and the first one that has it wins:
 ``listen.port`` is ``SLUICE_LISTEN_PORT``.
 
 The engine (lookup order, strict coercion, ``check=``) is interpose's (design 0003); this module
-holds sluice's settings and its own rules. To add a setting, add it to SETTINGS and to Config, and
-read it in load_config. A rule on one value goes in the setting's ``check``; a rule across
-settings goes in load_config. The wiki's settings table is generated from SETTINGS
-(``scripts/gen-wiki.py``), so write its help as you want users to read it. Values are never
-logged; only where each one came from is.
+holds sluice's settings and its own rules. Its contract with the template-owned files (``cli.py``,
+``scripts/gen-wiki.py``): it exports SETTINGS, CONFIG_ENV, Config (with ``sources``), ConfigError
+and ``load_config(path=None, environ=None)``.
+
+To add a setting, add it to SETTINGS and to Config, and read it in load_config. A rule on one
+value goes in the setting's ``check``; a rule across settings goes in load_config. The wiki's
+settings table is generated from SETTINGS (``scripts/gen-wiki.py``), so write its help as you
+want users to read it. Values are never logged; only where each one came from is.
 """
 
 from __future__ import annotations

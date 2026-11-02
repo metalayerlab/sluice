@@ -8,6 +8,7 @@ requires-python = ">=3.13"
 license = "Unlicense"
 dependencies = [
     "interpose @ git+https://github.com/metalayerlab/interpose@v0.1.0",
+    "pyyaml>=6.0",
     "typer>=0.15",
 ]
 
@@ -37,12 +38,12 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# interpose is pinned to a GitHub tag, not PyPI (design 0003): a direct reference.
-[tool.hatch.metadata]
-allow-direct-references = true
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/sluice"]
+
+[tool.hatch.metadata]
+# interpose is pinned by its git URL, not PyPI (template-python decision 0003)
+allow-direct-references = true
 
 [tool.ruff]
 line-length = 100

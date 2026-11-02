@@ -50,6 +50,38 @@ def test_defaults_when_no_file(tmp_path: Path) -> None:
     assert set(cfg.sources.values()) == {"default"}
 
 
+def test_each_source_end_to_end(write_config: Callable[..., Path], tmp_path: Path) -> None:
+    level = tmp_path / "level"
+    level.write_text("error\n", encoding="utf-8")
+    path = write_config("log_level: debug\nmount:\n  fsname: fromfile\n  point: /mnt/f\n")
+    env = {
+        "SLUICE_LOG_LEVEL": "warning",
+        "SLUICE_LOG_LEVEL_FILE": str(level),
+        "SLUICE_MOUNT_FSNAME": "fromenv",
+    }
+    cfg = load_config(path, environ=env)
+    assert (cfg.log_level, cfg.mount_fsname, cfg.mount_point, cfg.app_module) == (
+        "ERROR",
+        "fromenv",
+        "/mnt/f",
+        "",
+    )
+    assert cfg.sources["log_level"] == "SLUICE_LOG_LEVEL_FILE"
+    assert cfg.sources["mount.fsname"] == "SLUICE_MOUNT_FSNAME"
+    assert cfg.sources["mount.point"] == "file"
+    assert cfg.sources["app.module"] == "default"
+
+
+def test_top_level_must_be_mapping(write_config: Callable[..., Path]) -> None:
+    with pytest.raises(ConfigError, match="the top level must be a mapping"):
+        load_config(write_config("- a\n- b\n"), environ={})
+
+
+def test_invalid_yaml(write_config: Callable[..., Path]) -> None:
+    with pytest.raises(ConfigError, match="cannot parse"):
+        load_config(write_config("log_level: [unclosed\n"), environ={})
+
+
 def test_config_path_from_environment(write_config: Callable[..., Path]) -> None:
     path = write_config("log_level: error\n")
     cfg = load_config(environ={"SLUICE_CONFIG": str(path)})
