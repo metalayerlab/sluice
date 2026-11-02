@@ -6,11 +6,12 @@
 # ============================================================
 FROM python:3.13-slim AS builder
 
-# The `build:` packages in contrib/system-packages.txt (project-owned): compilers
-# and headers for dependencies that build from source. None listed: nothing runs
+# git, for uv to fetch interpose (pinned to a git tag: template-python decision 0003),
+# and the `build:` packages in contrib/system-packages.txt (project-owned): compilers
+# and headers for dependencies that build from source
 # hadolint ignore=DL3008,SC2046
 RUN --mount=type=bind,source=contrib/system-packages.txt,target=/tmp/system-packages.txt \
-    set -- $(sed -n 's/^build://p' /tmp/system-packages.txt); \
+    set -- git $(sed -n 's/^build://p' /tmp/system-packages.txt); \
     if [ $# -gt 0 ]; then \
         apt-get update \
         && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@" \
