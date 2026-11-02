@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/metalayerlab/sluice/compare/v0.2.1...v0.2.2) (2026-11-02)
+
+
+### ✨ Features
+
+* sluice metrics at /.sluice/metrics (design 0005) ([#55](https://github.com/metalayerlab/sluice/issues/55)) ([1b5e2cf](https://github.com/metalayerlab/sluice/commit/1b5e2cfd2316f52df24fe31683bad2ec45a1ffa9))
+
 ## [0.2.1](https://github.com/metalayerlab/sluice/compare/v0.2.0...v0.2.1) (2026-11-02)
 
 
