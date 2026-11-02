@@ -58,6 +58,54 @@ jobs:
         if: matrix.python-version == '3.13'
         run: uv run scripts/gen-wiki.py --check
 
+  # The Copier answer `integration_ci`: the tests marked `integration`. It fails, never
+  # passes vacuously, when none runs or one is skipped (a missing package or device).
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      # Both lists in contrib/system-packages.txt: `build:` to install the dependencies,
+      # `runtime:` for the tests to use them.
+      - name: System packages
+        run: |
+          if grep -qE '^(build|runtime):.*[^[:space:]]' contrib/system-packages.txt; then
+            sudo apt-get update
+            sed -nE 's/^(build|runtime)://p' contrib/system-packages.txt | xargs sudo apt-get install -y --no-install-recommends
+          fi
+
+      # with the optional extras the Copier answer `integration_extras` names
+      - name: Install (from the lock file)
+        run: uv sync --locked --extra fuse
+
+      # pytest fails when no test is selected. The coverage floor is the Test job's.
+      - name: Integration tests
+        env:
+          RUN_INTEGRATION: "1"
+        run: uv run pytest -m integration --no-cov --junitxml="$RUNNER_TEMP/integration.xml"
+
+      - name: No integration test was skipped
+        run: |
+          python3 - "$RUNNER_TEMP/integration.xml" <<'EOF'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          skipped = [
+              f"{case.get('classname')}.{case.get('name')}: {skip.get('message')}"
+              for case in ET.parse(sys.argv[1]).iter("testcase")
+              if (skip := case.find("skipped")) is not None and skip.get("type") != "pytest.xfail"
+          ]
+          for test in skipped:
+              print(f"::error::skipped {test}")
+          sys.exit(1 if skipped else 0)
+          EOF
+
   markdown:
     name: Markdown lint
     runs-on: ubuntu-latest
