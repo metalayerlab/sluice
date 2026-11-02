@@ -1,6 +1,6 @@
 ---
-description: Project instructions live in AGENTS.md
+description: Project instructions live in AGENTS.md and .agents/stack.md
 alwaysApply: true
 ---
 
-Follow AGENTS.md (Cursor loads it automatically). This rule adds nothing to it.
+Follow AGENTS.md (Cursor loads it automatically) and read .agents/stack.md. This rule adds nothing to them.

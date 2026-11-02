@@ -1,0 +1,88 @@
+# Template-owned: template-base. Change it there and pull it in with `copier update`.
+# The one required check is `ci`, whatever the stack: point branch protection at it.
+# Stack jobs live in the stack overlay's stack-ci.yml (a slot); checks in scripts/checks.d/.
+name: CI
+
+# Branches are checked through their PR: pushing to a branch with an open PR
+# would otherwise run every job twice.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # Allow-list false positives in .gitleaks.toml, never by disabling the job.
+      # The image and arguments live in the script, so a local run matches this one.
+      - name: gitleaks
+        run: scripts/check-docs-secrets.sh secrets
+
+  checks:
+    name: Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      # Every template's checks, in order: scripts/checks.d/* (00-base first).
+      - name: scripts/checks.sh
+        run: sh scripts/checks.sh
+
+  stack:
+    name: Stack
+    uses: ./.github/workflows/stack-ci.yml
+
+  workflows:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+
+  # The required check. A job can't run steps and call a reusable workflow, so `ci`
+  # gathers the others: it passes only if each passed (or was skipped by its own `if`).
+  ci:
+    name: ci
+    if: always()
+    needs: [secrets, checks, stack, workflows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for r in $RESULTS; do
+            case "$r" in success|skipped) ;; *) echo "a job ended in: $r"; exit 1 ;; esac
+          done
+
+  # A warning, not a failure: only a repository admin can fix it, outside any PR
+  # (template-base decision 0001). An invalid file still fails, in scripts/checks.d/00-base.sh.
+  metadata:
+    name: GitHub's About box
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Matches .github/repository.toml?
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          rc=0; python3 scripts/repo-metadata.py --check || rc=$?
+          if [ "$rc" = 1 ]; then
+            echo "::warning::GitHub's About box differs from .github/repository.toml: run python3 scripts/repo-metadata.py"
+          elif [ "$rc" != 0 ]; then exit "$rc"; fi

@@ -1,7 +1,8 @@
-# Template-owned. The project wiki lives in docs/wiki/ and is reviewed with the
-# code; this checks it and mirrors it, one way, to the GitHub wiki. Never edit
-# the GitHub wiki directly: the next publish overwrites it.
-# See the wiki's Contributing page and project-template's Project-Wiki-Standard.
+# Template-owned: template-python. The project wiki lives in docs/wiki/ and is reviewed
+# with the code. Its standard is checked inside the required `ci` (scripts/checks.d/20-python.sh);
+# this workflow, outside `ci` because it reruns when a label changes, checks the docs changed
+# with the code, and mirrors docs/wiki/ one way to the GitHub wiki. Never edit the GitHub
+# wiki directly: the next publish overwrites it. See the wiki's Contributing page.
 name: Wiki
 
 on:
@@ -16,32 +17,6 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    name: Wiki standard
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: '3.13'
-
-      # Release PRs are strict: nothing ships while a page still holds skeleton guidance.
-      - name: Structure, headings, sidebar, links
-        run: |
-          if [ "${{ startsWith(github.head_ref, 'release-please--') }}" = "true" ]; then
-            python3 scripts/check-wiki.py --strict
-          else
-            python3 scripts/check-wiki.py
-          fi
-
-      # The image, globs and config live in the script, so a local run matches this one.
-      - name: Markdown lint
-        run: scripts/check-docs-secrets.sh docs
-
-      - name: .github/repository.toml is valid
-        run: python3 scripts/repo-metadata.py --validate
-
   docs-touched:
     name: Docs updated with the code
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'no-docs-needed') && !startsWith(github.head_ref, 'release-please--')
@@ -70,7 +45,6 @@ jobs:
 
   publish:
     name: Publish to the GitHub wiki
-    needs: check
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -79,7 +53,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The wiki repository exists only once its first page has been created in
-      # the web UI (one-off; see Quick-Start in project-template's wiki).
+      # the web UI (one-off; see template-python's README).
       - name: Mirror docs/wiki/ to ${{ github.repository }}.wiki
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -99,14 +73,3 @@ jobs:
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
               commit -m "docs: publish from ${GITHUB_SHA::7}" -m "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA"
           git push
-
-      # A warning, not a failure: only a repository admin can fix it, outside any PR
-      # (project-template design record 0010). An invalid file still fails.
-      - name: GitHub's About box matches .github/repository.toml?
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          rc=0; python3 scripts/repo-metadata.py --check || rc=$?
-          if [ "$rc" = 1 ]; then
-            echo "::warning::GitHub's About box differs from .github/repository.toml: run python3 scripts/repo-metadata.py"
-          elif [ "$rc" != 0 ]; then exit "$rc"; fi

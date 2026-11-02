@@ -1,0 +1,21 @@
+# Written by Copier: never edit by hand. `copier update` reads it to know
+# which template version and answers this project was made from.
+_commit: v2.0.0
+_src_path: gh:andronics/template-python
+base_answers:
+    code_owners: '@metalayerlab/maintainers'
+    dependabot_automerge: 'off'
+    description: Sluice — a Python FUSE filesystem with an Express-style router that
+        gates, rewrites, and middleware-intercepts every filesystem call between virtual
+        paths and their backing stores.
+    github_owner: metalayerlab
+    license: Unlicense
+    personal_data_guard: false
+    project_name: sluice
+container_image: true
+image_extras:
+- fuse
+integration_ci: false
+kind: cli
+package_name: sluice
+python_version: '3.13'

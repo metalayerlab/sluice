@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Validate the deployment manifests: what CI's `manifests` job runs.
-# Template-owned. A missing tool is skipped locally, but is an error in CI.
-# Quiet on a pass: one summary line; a failing tool's output in full (design record 0007).
+# Template-owned: template-python. A missing tool is skipped locally, but is an error in CI.
+# Quiet on a pass: one summary line; a failing tool's output in full (template-base decision 0001).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

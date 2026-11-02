@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the generated sections of docs/wiki/ from the code.
+"""Regenerate the generated sections of docs/wiki/ from the code. Template-owned: template-python.
 
     uv run scripts/gen-wiki.py           # rewrite the sections
     uv run scripts/gen-wiki.py --check   # CI: fail if any section is stale
@@ -11,7 +11,7 @@ A generated section sits between markers, and everything between them is replace
     <!-- generated:end settings -->
 
 Blocks: settings (config.SETTINGS), cli (the Typer app), http-api (the OpenAPI schema).
-Write prose around the markers, never inside them. Template-owned (Python layer).
+Write prose around the markers, never inside them.
 """
 
 from __future__ import annotations
@@ -38,9 +38,13 @@ def settings() -> str:
         "|---|---|---|---|",
     ]
     for s in SETTINGS:
-        default = "*(none)*" if s.default == "" else f"`{s.default}`"
+        # A config.py from before list settings (its src/ is the project's) has no is_list.
+        is_list = bool(getattr(s, "is_list", False))
+        empty = "*(empty list)*" if is_list else "*(none)*"
+        default = empty if s.default == "" else f"`{s.default}`"
+        listed = " A list: YAML, or comma-separated." if is_list else ""
         secret = " 🔒 Secret: use the `_FILE` variant." if s.secret else ""
-        rows.append(f"| `{s.key}` | `{s.env}` | {default} | {_cell(s.help)}{secret} |")
+        rows.append(f"| `{s.key}` | `{s.env}` | {default} | {_cell(s.help)}{listed}{secret} |")
     return "\n".join(rows)
 
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Keep GitHub's About box (description, website, topics) in step with .github/repository.toml.
 
-Template-owned: changes come from project-template through `copier update` (its design
-record 0010). Stdlib only (Python >= 3.11) plus the GitHub CLI, so any layer's CI can run it.
+Template-owned: template-base; changes come through `copier update` (its decision 0001).
+Stdlib only (Python >= 3.11) plus the GitHub CLI, so any stack's CI can run it.
 
     scripts/repo-metadata.py             # apply the file with your `gh` login (repo admin)
     scripts/repo-metadata.py --check     # compare the file with GitHub; exit 1 on a difference

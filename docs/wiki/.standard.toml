@@ -1,8 +1,7 @@
 # The wiki standard: the pages every project keeps in docs/wiki/, and the
 # headings each must have. Checked by scripts/check-wiki.py in CI.
 #
-# Template-owned: change it in project-template (and its Project-Wiki-Standard
-# page), never here. Projects add pages of their own freely: every page just
+# Template-owned: template-python. Change it there, never here. Projects add pages of their own freely: every page just
 # has to be linked from _Sidebar.md.
 version = 1
 
@@ -47,16 +46,6 @@ headings = []
 
 [pages._Footer]
 headings = []
-
-# What AI assistants load every session, in characters (~4 per token). Template-owned:
-# raising a budget is a change to project-template (its design records 0002 and 0006), never local.
-# Keep rules in AGENTS.md and reasons in the wiki.
-[context_budget]
-"AGENTS.md" = 9000
-"CLAUDE.md" = 600
-"GEMINI.md" = 300
-".cursor/rules/project.mdc" = 300
-".github/copilot-instructions.md" = 700
 
 # A PR that changes one of these paths must change docs/wiki/ too, unless a
 # reviewer adds the no-docs-needed label (fnmatch patterns: * spans directories).

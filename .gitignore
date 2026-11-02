@@ -1,3 +1,4 @@
+# Template-owned: template-python (a slot: base's required entries are checked by scripts/checks.d/00-base.sh).
 # Python
 __pycache__/
 *.py[cod]
@@ -25,6 +26,7 @@ graphify-out/
 secrets/
 *.pem
 *.key
+private/
 /data/
 
 # Editors and AI assistants' local files
