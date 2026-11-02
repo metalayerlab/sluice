@@ -1,4 +1,4 @@
-"""Benchmark `run_pipeline` with and without `skip_inherited` (designs 0008, 0009).
+"""Benchmark `run_pipeline` with and without `skip_inherited` (designs 0008, 0009, 0010).
 
 A sluice call's middleware cost, in µs per call, for two five-middleware chains with no-op
 hook bodies and a no-op operation, so the numbers are the pipeline's own cost:
@@ -8,8 +8,8 @@ hook bodies and a no-op operation, so the numbers are the pipeline's own cost:
   successful call are the base class's no-ops;
 - **gates**: five `pre`-only gates: 5 of the 10 are no-ops.
 
-Each runs against the route tree frozen with sluice's `POLICY` (no `skip_inherited`) and with
-`skip_inherited=Middleware` added. Numbers vary by machine and run; compare within one run.
+Each runs against the route tree frozen with sluice's `POLICY` (`skip_inherited=Middleware`) and
+with the same policy without it. Numbers vary by machine and run; compare within one run.
 Not a test: nothing asserts timings.
 
     uv run benchmarks/bench_pipeline.py [--n 100000]
@@ -63,7 +63,7 @@ CHAINS: dict[str, list[object]] = {
 
 
 def freeze(chain: list[object], skip: bool) -> RouteTable:
-    """The tree frozen with sluice's POLICY, or with skip_inherited=Middleware added."""
+    """The tree frozen with sluice's POLICY, with or without skip_inherited=Middleware."""
     saved = mw_module.POLICY
     mw_module.POLICY = dataclasses.replace(saved, skip_inherited=Middleware if skip else None)
     try:

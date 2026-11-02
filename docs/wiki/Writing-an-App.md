@@ -91,6 +91,8 @@ class Redact(Middleware):
 
 A plain `async def fn(ctx)` passed as middleware is a `pre` hook.
 
+A hook you don't override is never called (design 0010). Which hooks a middleware overrides is settled when the route tree is frozen: a hook assigned on an instance or class later (`mw.pre = gate` after `freeze()` or the mount) is never called, so assign it before.
+
 **Order of one call:** routing → `param()` callbacks → `pre` hooks in chain order (global `use()` first, then each ancestor's, then the route's) → the operation → `post` hooks in reverse order.
 
 - **Deny** by raising `Deny("why")` (`EACCES`) or `FsError(errno.X)` in `pre`.
