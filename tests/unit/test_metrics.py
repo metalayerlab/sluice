@@ -305,3 +305,46 @@ def test_prepare_turns_metrics_on_from_the_setting(
     on = prepare(load_config(tmp_path / "n.yaml", environ=base | {"SLUICE_METRICS_ENABLED": "1"}))
     assert on.metrics is not None
     assert on.resolve("/.sluice/metrics") is not None
+
+
+def test_the_namespace_is_reserved_below_a_zero_segment_route_too() -> None:
+    a = Sluice()
+    a.route("").route(".sluice/x", backend="/srv")
+    with pytest.raises(RouteError, match=r"/\.sluice is reserved"):
+        a.freeze(metrics=Metrics())
+
+
+def test_a_similar_name_is_not_reserved() -> None:
+    a = Sluice()
+    a.route("/.sluicex", backend="/srv")
+    assert a.freeze(metrics=Metrics()).resolve("/.sluicex/f") is not None
+
+
+def test_sluice_dir_is_listed_when_an_app_route_covers_the_root(tmp_path: Path) -> None:
+    (tmp_path / ".sluice").mkdir()  # the backend's own entry is hidden, as any child route's
+    a = Sluice()
+    a.route("/{rest*}", backend=str(tmp_path))
+    root = a.freeze(metrics=Metrics()).resolve("/")
+    assert root is not None and root.children == (".sluice",)
+    plain = a.freeze().resolve("/")
+    assert plain is not None and plain.children == ()
+
+
+def test_anything_a_failed_hook_raises_is_a_failure(metrics: Metrics) -> None:
+    class DenyInFailed(Middleware):
+        async def failed(self, ctx: Context, error: FsError) -> None:
+            raise Deny()  # `failed` can't answer: the outcome is fixed
+
+    a = Sluice()
+    a.route("/x", backend="/nonexistent-backing", middlewares=[DenyInFailed()])
+    io = Passthrough(1)
+    try:
+        dd = Dispatcher(a.freeze(metrics=metrics), io)
+        assert fails(walk(dd, "/x/missing")) == errno.ENOENT
+    finally:
+        io.shutdown()
+    text = metrics.render().decode()
+    assert (
+        sample(text, 'sluice_middleware_failures_total{middleware="DenyInFailed",hook="failed"}')
+        == 1
+    )

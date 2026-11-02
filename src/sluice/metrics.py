@@ -84,8 +84,9 @@ class Metrics:
         )
         self.middleware_failures = Counter(
             "sluice_middleware_failures_total",
-            "Middleware hooks that raised something other than an FsError (a deliberate"
-            " answer), by middleware and hook.",
+            "Middleware hooks that failed, by middleware and hook: a pre or post hook that"
+            " raised something other than an FsError (a deliberate answer), or a failed hook"
+            " that raised anything.",
             [self.middleware, Label("hook", HOOKS)],
         )
         self.registry = Registry(

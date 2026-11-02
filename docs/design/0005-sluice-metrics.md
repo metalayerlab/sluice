@@ -31,10 +31,10 @@ Constraints:
 
 | Metric | Type | Labels | What |
 |---|---|---|---|
-| `sluice_call_duration_seconds` | histogram | `op` | Every filesystem call through the dispatcher, failed ones included: its `_count` is the per-operation call count |
+| `sluice_call_duration_seconds` | histogram | `op` | Every filesystem call through the dispatcher that returns or fails: its `_count` is the per-operation call count |
 | `sluice_call_errors_total` | counter | `op`, `errno` | Calls that failed, by the errno returned to the kernel |
 | `sluice_middleware_seconds_total` | counter | `middleware` | Time spent in each middleware's hooks |
-| `sluice_middleware_failures_total` | counter | `middleware`, `hook` | Hooks that raised something other than an `FsError` |
+| `sluice_middleware_failures_total` | counter | `middleware`, `hook` | `pre`/`post` hooks that raised something other than an `FsError`; `failed` hooks that raised anything |
 
 Label values, each from a declared set:
 
@@ -50,14 +50,18 @@ Label values, each from a declared set:
 Buckets are fixed (a dashboard contract): 0.1 ms to 5 s, 15 bounds, from a cached-metadata call to a
 slow backend or network-backed middleware.
 
-A deny (`Deny`, any `FsError` from a hook) is an answer, not a failure: it shows in
-`sluice_call_errors_total`, never in `sluice_middleware_failures_total`.
+A deny (`Deny`, any `FsError` from a `pre` or `post` hook) is an answer, not a failure: it shows in
+`sluice_call_errors_total`, not in `sluice_middleware_failures_total`. A `failed` hook can't answer
+(the outcome is fixed), so anything it raises, an `FsError` included, is a failure there, as interpose's
+observers treat it and as the log line says ("ignored").
 
 ### Where it is counted
 
 - **Calls**, in the `Dispatcher`: each of its 23 operation methods is wrapped once (`_measured`), so a
   routing failure (`ENOENT` for a path no route covers, `EXDEV` for a cross-backend rename) counts too,
-  though it never reaches the pipeline. `readdir` counts each page the kernel asks for.
+  though it never reaches the pipeline. `readdir` counts each page the kernel asks for. A call
+  cancelled under it (`CancelledError`, no reply to count) isn't counted, though its middleware time
+  is.
 - **Middleware time and failures**, in `run_pipeline`: `Run.timings` is added to
   `sluice_middleware_seconds_total` when the call ends, and `on_failure` counts every hook failure,
   including the `failed` hooks the pipeline ignores.
@@ -76,14 +80,16 @@ reader of the mount.
 - It is a route like any other, added under the root when the tree is frozen, so **global middleware
   (`app.use()`) runs on it**: an authorisation hook gates the metrics as it gates everything else.
 - `/.sluice` is a grouping route of its own, so it is a synthetic directory even when the app has a
-  root `{param}` route (literal segments win over params). The root listing shows `.sluice`.
+  root `{param}` route (literal segments win over params). The root listing shows `.sluice`, also
+  when an app route covers `/` itself (a root `{rest*}` or zero-segment route), where it hides a real
+  `.sluice` entry of that backend, as any child route's name does.
 - Write operations fail with `EROFS` (the `VirtualHandler` defaults).
 
 ### The namespace
 
 sluice didn't reserve `/.sluice/` before this record; 0001 named it only as a suggestion. With metrics
 on, it becomes sluice's: **any app route whose first segment is the literal `.sluice` is a
-`RouteError`** (`/.sluice is reserved for sluice's own files while metrics.enabled is on`). A dot
+`RouteError`**, below a zero-segment route too (`/.sluice is reserved for sluice's own files while metrics.enabled is on`). A dot
 name stays out of `ls` and glob listings, it is named after the project so it can't be mistaken for
 data, and it leaves room for `/.sluice/health` and later files without another reservation. Refusing
 the whole prefix rather than the one path follows 0001's rule (question 8): relaxing it later breaks

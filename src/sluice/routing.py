@@ -351,6 +351,10 @@ class RouteTable:
                 nxt = child.segments[len(tail)]
                 if nxt.kind is Kind.LITERAL and nxt.text not in listed:
                     listed.append(nxt.text)
+        if self.metrics is not None and not segs and NAMESPACE not in listed:
+            # A root `{rest*}` or zero-segment route resolves "/" to itself, whose children
+            # don't include sluice's own: list it anyway, as lookups reach it.
+            listed.append(NAMESPACE)
 
         masked = list(segs)
         for name, start, end in spans:
@@ -430,13 +434,7 @@ def compile_table(
     secret = {p.name for p in params if p.secret}
     reserved: list[Route] = []
     if metrics is not None:
-        for child in root.children:
-            first = child.segments[0] if child.segments else None
-            if first is not None and first.kind is Kind.LITERAL and first.text == NAMESPACE:
-                raise RouteError(
-                    f"{child.full_pattern}: /{NAMESPACE} is reserved for sluice's own files"
-                    " while metrics.enabled is on"
-                )
+        _refuse_namespace(root)
         # A grouping route of its own, so /.sluice is a directory even under a root `{param}`
         # route. Not added to the app's tree: freezing again must not find it there.
         group = Route(f"/{NAMESPACE}", parent=root)
@@ -509,6 +507,21 @@ def compile_table(
     if metrics is not None:
         metrics.declare_middleware(e.name for n in _nodes(tree) for e in n.pipeline.entries)
     return RouteTable(tree, params, config, metrics)
+
+
+def _refuse_namespace(route: Route) -> None:
+    """An app route under /.sluice is a RouteError, a zero-segment route's children included
+    (their patterns start at the root too)."""
+    for child in route.children:
+        if not child.segments:
+            _refuse_namespace(child)
+            continue
+        first = child.segments[0]
+        if first.kind is Kind.LITERAL and first.text == NAMESPACE:
+            raise RouteError(
+                f"{child.full_pattern}: /{NAMESPACE} is reserved for sluice's own files"
+                " while metrics.enabled is on"
+            )
 
 
 def _nodes(node: Node) -> Iterator[Node]:

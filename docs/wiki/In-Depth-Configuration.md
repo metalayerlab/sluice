@@ -55,10 +55,10 @@ With `metrics.enabled: true`, `cat <mount.point>/.sluice/metrics` prints Prometh
 
 | Metric | Labels | What |
 |---|---|---|
-| `sluice_call_duration_seconds` (histogram) | `op` | Every filesystem call, failed ones included; `_count` is the number of calls |
+| `sluice_call_duration_seconds` (histogram) | `op` | Every filesystem call, failed ones included (not one the kernel cancelled); `_count` is the number of calls |
 | `sluice_call_errors_total` | `op`, `errno` | Failed calls by the errno the caller got (`ENOENT`, `EACCES`, ...; `unknown` for a number outside the errno table) |
 | `sluice_middleware_seconds_total` | `middleware` | Seconds spent in each middleware's hooks |
-| `sluice_middleware_failures_total` | `middleware`, `hook` | Hooks (`pre`, `post`, `failed`) that raised something other than `FsError`/`Deny` |
+| `sluice_middleware_failures_total` | `middleware`, `hook` | `pre` and `post` hooks that raised something other than `FsError`/`Deny`, and `failed` hooks that raised anything |
 
 `op` is one of the operations middleware sees (`forget`, `release` and `releasedir` aren't counted), and `middleware` is the name `sluice routes` prints. No label ever holds a path, a route param or a user: per-path detail is what an access-log middleware is for. A denial counts as an error of its call, not as a middleware failure.
 
