@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/metalayerlab/sluice/compare/v0.2.0...v0.2.1) (2026-11-02)
+
+
+### ✨ Features
+
+* adopt interpose pipeline core (design 0004) ([#53](https://github.com/metalayerlab/sluice/issues/53)) ([9a47934](https://github.com/metalayerlab/sluice/commit/9a479345fd8c178f3009164caab82c62d878ad45))
+
 ## [0.2.0](https://github.com/metalayerlab/sluice/compare/v0.1.2...v0.2.0) (2026-11-02)
 
 
