@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Check docs/wiki/ against the wiki standard (docs/wiki/.standard.toml).
 
-Template-owned: changes come from project-template through `copier update`.
-Stdlib only (Python >= 3.11), so any language layer's CI can run it.
+Template-owned: template-python. Changes come from there through `copier update`.
+Stdlib only (Python >= 3.11): base-ci's `checks` job runs it before the project is installed.
 
     scripts/check-wiki.py                      # structure, links, sidebar
     scripts/check-wiki.py --strict             # also fail on leftover guidance (Release PRs)
@@ -17,7 +17,6 @@ Errors, in every mode:
   - unbalanced <!-- generated:start/end --> markers
 
   - a design record (docs/design/NNNN-*.md) missing from the index, docs/design/README.md
-  - an always-loaded AI instruction file (AGENTS.md, CLAUDE.md, ...) over its [context_budget]
 
 Warnings (errors with --strict): leftover <!-- guidance: ... --> comments and
 TODO(wiki) markers, i.e. skeleton text that was never written.
@@ -72,8 +71,8 @@ def slug(text: str) -> str:
     return text.replace(" ", "-")
 
 
-def prose_lines(text: str) -> list[tuple[int, str]]:
-    """(line number, line) outside fenced code blocks, with inline code removed."""
+def unfenced_lines(text: str) -> list[tuple[int, str]]:
+    """(line number, line) outside fenced code blocks."""
     out: list[tuple[int, str]] = []
     fenced = False
     for n, line in enumerate(text.splitlines(), 1):
@@ -81,8 +80,13 @@ def prose_lines(text: str) -> list[tuple[int, str]]:
             fenced = not fenced
             continue
         if not fenced:
-            out.append((n, INLINE_CODE.sub("", line)))
+            out.append((n, line))
     return out
+
+
+def prose_lines(text: str) -> list[tuple[int, str]]:
+    """(line number, line) outside fenced code blocks, with inline code removed."""
+    return [(n, INLINE_CODE.sub("", line)) for n, line in unfenced_lines(text)]
 
 
 def strip_comments(text: str) -> str:
@@ -91,11 +95,12 @@ def strip_comments(text: str) -> str:
 
 
 def headings(text: str) -> list[str]:
+    """Heading texts. GitHub keeps inline code's text in the anchor, so only the backticks go."""
     found = []
-    for _, line in prose_lines(strip_comments(text)):
+    for _, line in unfenced_lines(strip_comments(text)):
         m = HEADING.match(line)
         if m:
-            found.append(m.group(2))
+            found.append(m.group(2).replace("`", ""))
     return found
 
 
@@ -182,18 +187,6 @@ def check_design_index(design: Path, report: Report) -> None:
             report.error(f"design record {record.name} is not listed in the index", index)
 
 
-def check_context_budget(standard: dict[str, Any], report: Report) -> None:
-    """Files every assistant session loads stay small: rules in AGENTS.md, reasons in the wiki."""
-    for name, limit in standard.get("context_budget", {}).items():
-        path = Path(name)
-        if path.is_file() and (size := len(path.read_text(encoding="utf-8"))) > limit:
-            report.error(
-                f"{size} characters, over the context budget of {limit}: keep rules terse and move"
-                " reasons to the wiki (the budget is in docs/wiki/.standard.toml)",
-                path,
-            )
-
-
 def check_docs_touched(wiki: Path, standard: dict[str, Any], base: str, report: Report) -> None:
     out = subprocess.run(
         ["git", "diff", "--name-only", f"{base}...HEAD"], capture_output=True, text=True, check=True
@@ -206,7 +199,7 @@ def check_docs_touched(wiki: Path, standard: dict[str, Any], base: str, report: 
         report.error(
             "user-facing code changed without a wiki change: "
             + ", ".join(hits)
-            + f". Update {wiki_prefix} (see AGENTS.md, 'Docs map'), or have a"
+            + f". Update {wiki_prefix} (see .agents/stack.md, 'Docs map'), or have a"
             " reviewer add the no-docs-needed label if nothing user-visible changed."
         )
 
@@ -233,9 +226,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         check_structure(args.wiki, standard, report, args.strict)
         check_design_index(args.design, report)
-        check_context_budget(standard, report)
 
-    # Quiet on a pass: an assistant reads this output on every run (design record 0007).
+    # Quiet on a pass: an assistant reads this output on every run (template-base decision 0001).
     if args.verbose:
         for warning in report.warnings:
             print(f"warning: {warning}")

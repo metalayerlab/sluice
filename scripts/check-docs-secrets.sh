@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# Lint the Markdown and scan for secrets: what CI's Wiki standard and Secret
-# scan jobs run, with the same images and arguments (they call this script).
-# Template-owned. Without Docker it skips locally, but is an error in CI.
-# Quiet on a pass: one summary line; a failing tool's output in full (design record 0007).
+# Scan for secrets: what CI's Secret scan job runs, with the same image and
+# arguments (it calls this script). A stack that lints Markdown does it in its own
+# scripts/checks.d/ drop-in (template-base decision 0001).
+# Template-owned: template-base. Without Docker it skips locally, but is an error in CI.
+# Quiet on a pass: one summary line; a failing tool's output in full (template-base decision 0001).
 #
-#   scripts/check-docs-secrets.sh            # both
-#   scripts/check-docs-secrets.sh docs       # markdownlint-cli2 only
-#   scripts/check-docs-secrets.sh secrets    # gitleaks only
+#   scripts/check-docs-secrets.sh            # gitleaks
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-checks="${1:-docs secrets}"
+checks="${1:-secrets}"
 
 if ! command -v docker > /dev/null 2>&1; then
     if [ "${CI:-}" = "true" ]; then
@@ -38,18 +37,13 @@ run() {
 
 for check in $checks; do
     case "$check" in
-        docs)
-            # Config: .markdownlint-cli2.yaml (CHANGELOG.md is release-please's).
-            run markdownlint docker run --rm -v "$PWD:/workdir" davidanson/markdownlint-cli2:v0.24.0 \
-                "docs/wiki/*.md" "*.md" "!CHANGELOG.md"
-            ;;
         secrets)
             # Scans commits, as CI does. Allow-list false positives in .gitleaks.toml.
             run gitleaks docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:v8.30.1 \
                 git --redact --verbose --no-banner --no-color --config .gitleaks.toml .
             ;;
         *)
-            echo "usage: $0 [docs|secrets]"
+            echo "usage: $0 [secrets]"
             exit 2
             ;;
     esac

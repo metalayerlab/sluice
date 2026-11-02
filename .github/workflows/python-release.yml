@@ -1,8 +1,9 @@
-# Template-owned. Versioning and CHANGELOG.md, from Conventional Commits.
+# Template-owned: template-python. Versioning and CHANGELOG.md, from Conventional Commits.
 #
 # Every push to main updates one open "Release PR" that bumps the version and
 # writes the CHANGELOG entry. A human reviews and merges it; that tags vX.Y.Z,
-# publishes the GitHub Release and builds the release image.
+# publishes the GitHub Release; template-container's container-build.yml
+# then builds the release image (it follows this workflow by its name, Release).
 # See the wiki's Release-Process page.
 #
 # Token: PRs and tags made with GITHUB_TOKEN don't trigger other workflows, so
@@ -64,7 +65,7 @@ jobs:
         with:
           ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
           token: ${{ steps.app-token.outputs.token || github.token }}
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Refresh uv.lock
         run: |
           uv lock
@@ -73,14 +74,3 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore: refresh uv.lock for the release" -- uv.lock
           git push
-
-  image:
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
-    permissions:
-      contents: read
-      packages: write
-    uses: ./.github/workflows/docker-build.yml
-    with:
-      tag: ${{ needs.release-please.outputs.tag_name }}
-      latest: true

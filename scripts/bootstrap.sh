@@ -1,18 +1,16 @@
 #!/bin/sh
-# One-off setup after `copier copy` (Copier runs it for you with --trust).
-# Safe to re-run: `copier update` runs it again.
+# Template-owned: template-base. One-off setup after `copier copy` (Copier runs it
+# with --trust). Safe to re-run. Each template adds its steps as scripts/bootstrap.d/*.
+# Local only: a step may assume sh and git. For any other tool it checks first and,
+# when it's missing, prints what to install and carries on, as pre-commit below does.
 set -eu
 cd "$(dirname "$0")/.."
 
 [ -d .git ] || git init -q -b main
-
-if ! command -v uv >/dev/null 2>&1; then
-    echo "uv is not installed: see https://docs.astral.sh/uv/, then re-run scripts/bootstrap.sh" >&2
-    exit 1
-fi
-uv lock --quiet
-# Fill the wiki's generated sections (settings, CLI, HTTP API) from the code.
-uv run --quiet scripts/gen-wiki.py > /dev/null
+for step in scripts/bootstrap.d/*.sh; do
+    [ -e "$step" ] || continue
+    sh "$step"
+done
 
 if command -v pre-commit >/dev/null 2>&1; then
     pre-commit install --install-hooks -t pre-commit -t commit-msg > /dev/null

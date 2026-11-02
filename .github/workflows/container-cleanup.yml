@@ -1,4 +1,4 @@
-# Template-owned. Deletes branch images (dev-*, feat-*, and their -<sha>
+# Template-owned: template-container. Deletes branch images (dev-*, feat-*, and their -<sha>
 # variants) older than 7 days from GHCR. Scoped to those tag patterns, so it
 # never touches latest, edge, main or release tags.
 name: Docker image cleanup

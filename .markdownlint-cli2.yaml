@@ -1,4 +1,4 @@
-# Template-owned. markdownlint for the wiki and the top-level docs.
+# Template-owned: template-python. markdownlint for the wiki and the top-level docs.
 config:
   default: true
   MD013: false          # line length: prose wraps however the author likes

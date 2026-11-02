@@ -25,6 +25,12 @@ would defend it.
 - [ ] Each behaviour change has a test that would fail without it. Ask for proof when it isn't obvious.
 - [ ] Tests assert outcomes. They don't merely run the code or mirror its implementation.
 - [ ] Nothing was skipped, xfailed, loosened or deleted to make the suite pass.
+- [ ] Anything a caller, hook or plugin may replace is tested through every later operation on the
+      replacement, not only at the point of replacement.
+- [ ] A check that runs for two inputs (source and target, old and new) is tested with both inputs hitting
+      the same check, not only with each hitting a different one.
+- [ ] Config parsing is tested with every type the file format can produce (for YAML: int, float, bool,
+      list, mapping), not only with environment-variable strings.
 
 ## Security and supply chain
 
@@ -32,6 +38,11 @@ would defend it.
       docs and logs.
 - [ ] Input from users, files and the network is validated. No shell or SQL built from strings, and no
       `eval`, `pickle` or unsafe YAML loading of untrusted data.
+- [ ] Paths from untrusted input are confined by how the OS resolves them, not by comparing strings. No
+      filesystem call takes a full joined path an untrusted party can influence: open beneath a root
+      directory fd without following symlinks (`*at` calls with `O_NOFOLLOW`, or `openat2(RESOLVE_BENEATH)`).
+- [ ] A rule that keeps a value secret (masking, never logging) is checked against every place the value
+      or anything derived from it can end up: logs, error messages, CLI output, other derived values.
 - [ ] New dependencies are justified, exist on the index under exactly that name (typosquatting), are
       maintained, and have a compatible licence.
 - [ ] Hardening is intact: Dockerfile user, k8s `securityContext`, systemd sandbox, NetworkPolicy.
@@ -39,7 +50,7 @@ would defend it.
 
 ## Docs and release
 
-- [ ] The wiki pages in AGENTS.md's "Docs map" are updated, and they're accurate rather than merely present.
+- [ ] The wiki pages in .agents/stack.md's "Docs map" are updated, and they're accurate rather than merely present.
 - [ ] Generated wiki sections were regenerated, not hand-edited.
 - [ ] The PR title is a correct Conventional Commit. `feat` vs `fix`, and `!` for breaking, decide the
       version bump.
@@ -49,7 +60,7 @@ would defend it.
 
 - [ ] Changes to AGENTS.md are terse rules; the reasons went to the wiki. CI enforces the size budget, so a
       change that only fits by squeezing out other rules needs a second look.
-- [ ] New large or generated paths (fixtures, snapshots, build output) are in AGENTS.md "Don't read" and
+- [ ] New large or generated paths (fixtures, snapshots, build output) are in .agents/stack.md "Don't read" and
       denied in `.claude/settings.json`.
 - [ ] New design records are listed in `docs/design/README.md`.
 

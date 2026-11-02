@@ -1,0 +1,37 @@
+name: Change request from another repository
+description: A change another codebase needs from sluice, asked for here instead of made from there
+labels: [enhancement]
+title: "Request from <owner/repo>: "
+body:
+  - type: markdown
+    attributes:
+      value: Search the open and closed issues first. If one matches, add your case to it instead.
+  - type: input
+    id: from
+    attributes:
+      label: Requesting repository
+      placeholder: owner/repo
+    validations:
+      required: true
+  - type: textarea
+    id: need
+    attributes:
+      label: What you need, and why
+      description: The problem in your codebase, not only the change you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Optional. Files, interfaces or behaviour, as far as you know them.
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround in place
+      description: What you did meanwhile, and where it is, so it can go when this lands. "None" is fine.
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+      description: How you'll know it's fixed for you.

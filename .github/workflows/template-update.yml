@@ -1,6 +1,7 @@
-# Template-owned. Weekly: pull project-template's latest release into this repo
-# with `copier update` and open (or refresh) a PR. Conflicts are left inline as
-# <<<<<<< markers for the reviewer. See project-template's Updating-from-the-Template page.
+# Template-owned: template-base. Weekly: pull each template's latest release into this
+# repo with `copier update`, one PR per template, so each one keeps its own blast radius
+# and can be reverted on its own. Base first, then the stack overlay, then feature
+# overlays by name. Conflicts are left inline as <<<<<<< markers for the reviewer.
 #
 # Uses the release GitHub App when RELEASE_APP_CLIENT_ID is set (so CI runs on
 # the PR, a private template can be read, and workflow files can be pushed).
@@ -19,8 +20,32 @@ permissions:
   issues: write
 
 jobs:
-  update:
+  plan:
     runs-on: ubuntu-latest
+    outputs:
+      templates: ${{ steps.order.outputs.templates }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # .copier-answers.base.yml, then .copier-answers.stack-*.yml, then the rest by name.
+      - id: order
+        run: |
+          python3 - >> "$GITHUB_OUTPUT" <<'PY'
+          import json
+          from pathlib import Path
+          files = sorted(p.name for p in Path(".").glob(".copier-answers.*.yml"))
+          role = lambda n: 0 if n == ".copier-answers.base.yml" else 1 if n.startswith(".copier-answers.stack-") else 2
+          print("templates=" + json.dumps(sorted(files, key=lambda n: (role(n), n))))
+          PY
+
+  update:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      # In order, one at a time: each PR starts from main and stands alone.
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        answers: ${{ fromJSON(needs.plan.outputs.templates) }}
     steps:
       - id: app-token
         if: vars.RELEASE_APP_CLIENT_ID != ''
@@ -35,23 +60,41 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token || github.token }}
 
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
       - name: copier update
         env:
+          ANSWERS: ${{ matrix.answers }}
           TOKEN: ${{ steps.app-token.outputs.token || github.token }}
           HAS_APP: ${{ steps.app-token.outcome == 'success' }}
         run: |
           git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          before=$(grep '^_commit:' .copier-answers.yml)
-          uvx --from 'copier>=9.6,<10' copier update --trust --defaults --conflict inline
-          after=$(grep '^_commit:' .copier-answers.yml)
-          echo "FROM=${before#_commit: }" >> "$GITHUB_ENV"
-          echo "TO=${after#_commit: }" >> "$GITHUB_ENV"
-          if [ "$HAS_APP" != true ] && [ -n "$(git status --porcelain .github/workflows)" ]; then
-            echo "NEEDS_LOCAL=1" >> "$GITHUB_ENV"
+          src=$(sed -n 's/^_src_path: *//p' "$ANSWERS")
+          name=${src##*/}
+          before=$(grep '^_commit:' "$ANSWERS")
+          # --skip-tasks: Copier runs tasks before it reapplies the project's
+          # edits, so a failing task would drop them. post-update.sh runs next.
+          uvx --from 'copier>=9.19,<10' copier update -a "$ANSWERS" --trust --skip-tasks --defaults --conflict inline
+          after=$(grep '^_commit:' "$ANSWERS")
+          {
+            echo "TEMPLATE=${name}"
+            echo "FROM=${before#_commit: }"
+            echo "TO=${after#_commit: }"
+            if [ "$HAS_APP" != true ] && [ -n "$(git status --porcelain .github/workflows)" ]; then
+              echo "NEEDS_LOCAL=1"
+            fi
+          } >> "$GITHUB_ENV"
+
+      # After the merge, so the project's edits are already in: every template's
+      # scripts/post-update.d/* (a lock file refresh, say). It can fail on an inline
+      # conflict; the PR still opens and says so.
+      - name: scripts/post-update.sh
+        run: |
+          if ! sh scripts/post-update.sh; then
+            echo "::warning::scripts/post-update.sh failed after the update"
+            echo "POST_UPDATE_FAILED=1" >> "$GITHUB_ENV"
           fi
 
       # Copier copies files, not labels; the issue and the PR below need this one.
@@ -60,16 +103,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh label create template-update --force
-          --color C5DEF5 --description "copier update from project-template"
+          --color C5DEF5 --description "copier update from a template"
 
       - name: Ask for a local update (no App, workflow files changed)
         if: env.NEEDS_LOCAL == '1'
         env:
           GH_TOKEN: ${{ github.token }}
+          ANSWERS: ${{ matrix.answers }}
         run: |
-          title="chore: update from project-template ${TO} (run locally)"
-          body="project-template **${FROM}** → **${TO}** changes \`.github/workflows/\`, which \`GITHUB_TOKEN\` can't push. Run \`uvx copier update --trust --conflict inline\` locally and open the PR, or set up the release GitHub App (project-template wiki: Release-Process)."
-          n=$(gh issue list --label template-update --state open --json number -q '.[0].number')
+          title="chore: update from ${TEMPLATE} ${TO} (run locally)"
+          body="${TEMPLATE} **${FROM}** → **${TO}** changes \`.github/workflows/\`, which \`GITHUB_TOKEN\` can't push. Run \`uvx copier update -a ${ANSWERS} --trust --skip-tasks --conflict inline\` then \`sh scripts/post-update.sh\` locally and open the PR, or set up the release GitHub App."
+          n=$(gh issue list --label template-update --state open --search "in:title ${TEMPLATE}" --json number -q '.[0].number')
           if [ -n "$n" ]; then gh issue edit "$n" --title "$title" --body "$body"
           else gh issue create --label template-update --title "$title" --body "$body"; fi
 
@@ -77,16 +121,15 @@ jobs:
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
-          branch: chore/template-update
+          branch: chore/${{ env.TEMPLATE }}-update
           delete-branch: true
-          commit-message: "chore: update from project-template ${{ env.TO }}"
-          title: "chore: update from project-template ${{ env.TO }}"
+          commit-message: "chore: update from ${{ env.TEMPLATE }} ${{ env.TO }}"
+          title: "chore: update from ${{ env.TEMPLATE }} ${{ env.TO }}"
           labels: template-update
           body: |
-            `copier update` from project-template **${{ env.FROM }}** to **${{ env.TO }}**.
+            `copier update` from ${{ env.TEMPLATE }} **${{ env.FROM }}** to **${{ env.TO }}**.
+            ${{ env.POST_UPDATE_FAILED == '1' && '**`scripts/post-update.sh` failed after the update** (see the workflow log): resolve any conflicts, run it, and commit what it changes.' || '' }}
 
             - Search the diff for `<<<<<<<`: conflicts are left inline for you to resolve.
-            - Read the template's CHANGELOG for what changed and why.
-            - Pages under `docs/wiki/` (except Release-Process) and `src/`, `tests/` are
-              yours and never touched; `docs/wiki/.standard.toml` may have changed, so
-              the Wiki check may now ask for something new.
+            - Read the template's release notes for what changed and why.
+            - Only the files this template owns change; files the project owns are never touched.
