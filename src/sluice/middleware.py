@@ -199,6 +199,20 @@ def _as_fs_error(ctx: Context, e: Exception, stage: str) -> FsError:
     return FsError(errno.EIO)
 
 
+# Why a hook's result came back after its limit (interpose 0.1.4's `Failure.late`): it never
+# reached an `await` the cancellation could land on, or it caught the cancellation and returned.
+_LATE = {
+    "overran": " (it blocked the event loop past the limit)",
+    "swallowed": " (it swallowed the cancellation)",
+}
+
+
+def _timed_out(failure: Failure) -> str:
+    """`<middleware>.<hook> timed out after <s>s`, and why its result was late, if it was."""
+    late = _LATE.get(failure.late or "", "")
+    return f"{failure.middleware}.{failure.hook} timed out after {failure.timeout:g}s{late}"
+
+
 class _Report:
     """`on_failure` for one call. Every failure is counted (with metrics on). A failure under
     "fail" ends the call and is logged once, by `_as_fs_error`; only one the pipeline carried on
@@ -212,13 +226,7 @@ class _Report:
         if self.metrics is not None:
             self.metrics.failure(failure)
         if failure.action == "skip" and failure.timed_out:
-            log.error(
-                "%s.%s timed out after %gs [%s]; ignored",
-                failure.middleware,
-                failure.hook,
-                failure.timeout,
-                self.ctx.correlation_id,
-            )
+            log.error("%s [%s]; ignored", _timed_out(failure), self.ctx.correlation_id)
         elif failure.action == "skip":
             log.error(
                 "%s.%s raised [%s]; ignored",
@@ -314,12 +322,10 @@ async def run_pipeline(
             # Fail closed, as any other hook failure does; the traceback of a cancellation
             # says nothing, so one line naming the hook and the limit.
             log.error(
-                "%s %s: %s.%s timed out after %gs [%s]",
+                "%s %s: %s [%s]",
                 ctx.op,
                 ctx.display_path,
-                e.failure.middleware,
-                e.failure.hook,
-                e.failure.timeout,
+                _timed_out(e.failure),
                 ctx.correlation_id,
             )
             error = FsError(errno.EIO)

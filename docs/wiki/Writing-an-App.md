@@ -107,7 +107,7 @@ Middleware runs on the event loop that serves the whole mount. **Never block in 
 With `pipeline.timeout_ms` set, a hook that runs longer is **cancelled at the `await` it is suspended in**, and the call fails with `EIO` (design 0006). Write every hook so that can happen:
 
 - **Be cancel-safe.** Leave shared state consistent at every `await`: take and release locks with `async with`, undo partial work in `finally`.
-- **Never swallow `CancelledError`.** Don't catch `BaseException` or `asyncio.CancelledError` without re-raising it. A hook that swallows it runs on past its limit and the call carries on as if no timeout fired.
+- **Never swallow `CancelledError`.** Don't catch `BaseException` or `asyncio.CancelledError` without re-raising it. A hook that swallows it runs on, holding the call, until it returns; its result is then discarded and the call fails with `EIO` anyway (the log says `(it swallowed the cancellation)`). A hook that blocks the loop past its limit is treated the same way (`(it blocked the event loop past the limit)`).
 - **Blocking work goes through `ctx.backend`**, which runs it in the I/O pool. A hook that blocks the loop can't be cancelled at all, and stalls every call.
 - **A timed-out backend call keeps running** in its thread: Python can't stop a syscall. Its result is dropped, and a write may still happen. `backend.max_abandoned` bounds how many such threads a hung backend can hold: past it, backend calls fail fast with `EIO` until they finish (see [In-Depth Configuration](In-Depth-Configuration#settings)). Work you start with `asyncio.to_thread` isn't counted there: prefer `ctx.backend` for file I/O.
 
