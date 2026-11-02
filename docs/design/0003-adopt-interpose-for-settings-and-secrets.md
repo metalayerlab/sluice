@@ -2,7 +2,7 @@
 
 <!-- Add a line for this record to the index in docs/design/README.md (CI checks). -->
 
-Status: Proposed
+Status: Implemented
 Date: 2026-11-02
 Authors: Stephen Cox
 Supersedes: the `env.expose` type (str, comma-separated) in [0001](0001-initial-design.md)'s settings table
