@@ -245,8 +245,8 @@ wheels = [
 
 [[package]]
 name = "interpose"
-version = "0.1.5"
-source = { git = "https://github.com/metalayerlab/interpose?rev=v0.1.5#401dce1dc2e82ea83f8b21f78fc61007fa55d509" }
+version = "0.2.0"
+source = { git = "https://github.com/metalayerlab/interpose?rev=v0.2.0#0ff135e71e9821ad2fbbc960c6cafcbe44111f26" }
 dependencies = [
     { name = "pyyaml" },
 ]
@@ -620,7 +620,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "interpose", git = "https://github.com/metalayerlab/interpose?rev=v0.1.5" },
+    { name = "interpose", git = "https://github.com/metalayerlab/interpose?rev=v0.2.0" },
     { name = "pyfuse3", marker = "extra == 'fuse'", specifier = ">=3.5.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "typer", specifier = ">=0.15" },
