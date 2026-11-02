@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/metalayerlab/sluice/compare/v0.2.4...v0.2.5) (2026-11-02)
+
+
+### ⚡ Performance
+
+* turn skip_inherited back on with interpose v0.2.2 ([#73](https://github.com/metalayerlab/sluice/issues/73)) ([3357f17](https://github.com/metalayerlab/sluice/commit/3357f177e25ca6244cb24bdb6ee2e1233394768d))
+
 ## [0.2.4](https://github.com/metalayerlab/sluice/compare/v0.2.3...v0.2.4) (2026-11-02)
 
 
