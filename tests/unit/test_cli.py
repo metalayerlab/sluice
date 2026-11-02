@@ -31,10 +31,12 @@ def test_config_error_exits_2(write_config: Callable[..., Path]) -> None:
 def test_secrets_are_masked(
     monkeypatch: pytest.MonkeyPatch, write_config: Callable[..., Path]
 ) -> None:
-    from sluice import cli
-    from sluice.config import SETTINGS, Setting
+    from dataclasses import replace
 
-    secret = Setting(SETTINGS[0].key, SETTINGS[0].default, SETTINGS[0].help, secret=True)
+    from sluice import cli
+    from sluice.config import SETTINGS
+
+    secret = replace(SETTINGS[0], secret=True)
     monkeypatch.setattr(cli, "SETTINGS", (secret, *SETTINGS[1:]))
     result = runner.invoke(app, ["config", "-c", str(write_config(""))])
     assert "log_level = ********" in result.stdout

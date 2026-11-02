@@ -32,8 +32,8 @@ io:
   threads: 8
 
 env:
-  # Comma-separated environment variable names copied into ctx.config.env
-  expose: ""
+  # Environment variable names copied into ctx.config.env: a list, or comma-separated
+  expose: []
 
 secrets:
   # Each regular file becomes ctx.config.secret[<filename>]

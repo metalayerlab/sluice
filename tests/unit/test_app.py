@@ -59,14 +59,12 @@ def test_route_error_during_import_is_kept(app_dir: Path) -> None:
         load_app("badroute:app", str(app_dir))
 
 
-def test_secret_is_masked() -> None:
-    s = Secret("hunter2")
-    assert str(s) == "********"
-    assert "hunter2" not in repr(s)
-    assert s.reveal() == "hunter2"
-    assert s == Secret("hunter2")
-    assert s != "hunter2"
-    assert hash(s) == hash(Secret("hunter2"))
+def test_secret_is_interposes() -> None:
+    # sluice.Secret stays importable; its behaviour is interpose's, and tested there.
+    from interpose.secret import Secret as InterposeSecret
+
+    assert Secret is InterposeSecret
+    assert str(Secret("hunter2")) == "********"
 
 
 def test_mount_config_reads_env_allowlist_and_secrets(tmp_path: Path) -> None:
@@ -99,13 +97,13 @@ def test_mount_config_unreadable(tmp_path: Path) -> None:
     afile = tmp_path / "file"
     afile.write_text("x", encoding="utf-8")
     cfg = load_config(tmp_path / "n.yaml", environ={"SLUICE_SECRETS_DIR": str(afile)})
-    with pytest.raises(ConfigError, match="cannot read"):
+    with pytest.raises(ConfigError, match="cannot read secrets directory"):
         load_mount_config(cfg, environ={})
     secrets = tmp_path / "s"
     secrets.mkdir()
     (secrets / "bin").write_bytes(b"\xff\xfe")
     cfg = load_config(tmp_path / "n.yaml", environ={"SLUICE_SECRETS_DIR": str(secrets)})
-    with pytest.raises(ConfigError, match="bin"):
+    with pytest.raises(ConfigError, match=r"cannot read secret 'bin' in .*: not UTF-8"):
         load_mount_config(cfg, environ={})
 
 

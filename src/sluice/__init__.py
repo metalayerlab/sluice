@@ -7,9 +7,11 @@ middleware and virtual handlers, and serve it with `sluice mount`.
 
 from importlib.metadata import PackageNotFoundError, version
 
+from interpose.secret import Secret
+
 from sluice.app import Sluice
 from sluice.backend import BackendView
-from sluice.context import Attr, Caller, Context, DirEntry, MountConfig, Opened, Secret
+from sluice.context import Attr, Caller, Context, DirEntry, MountConfig, Opened
 from sluice.errors import Deny, FsError, RouteError
 from sluice.middleware import Middleware
 from sluice.routing import Route

@@ -54,11 +54,19 @@ A param registered with `secret=True` is used where it would end up in a real pa
 
 ### `error: mount.cache_ms: expected int, got 0.5` (or another number setting)
 
-A number setting (`mount.cache_ms`, `pipeline.slow_ms`, `io.threads`) holds something that isn't a whole number: a decimal, `true`/`false`, or a list. sluice refuses it rather than round it, since `0.5` would quietly become `0`. Write a whole number, e.g. `cache_ms: 500`. Environment variables are strings, so `SLUICE_MOUNT_CACHE_MS=500` works.
+A number setting (`mount.cache_ms`, `pipeline.slow_ms`, `io.threads`) holds something that isn't a whole number: a decimal, `true`/`false`, or a list. sluice refuses it rather than round it, since `0.5` would quietly become `0`. The message ends with where the value came from: `(from file)`, or the variable's name. Write a whole number, e.g. `cache_ms: 500`. Environment variables are strings, so `SLUICE_MOUNT_CACHE_MS=500` works, but write digits only: since sluice moved to interpose (design 0003), `SLUICE_MOUNT_CACHE_MS=1_000` is refused.
 
 ### `error: mount.point: expected str, got ['a']` (or another text setting)
 
-A text setting holds a YAML list or mapping. sluice refuses it rather than use its Python text (`['a']`) as the value. Write a single value, e.g. `point: /mnt/data`. `env.expose` is a comma-separated string too: `expose: HOME,USER`, not a list.
+A text setting holds a YAML list or mapping. sluice refuses it rather than use its Python text (`['a']`) as the value. Write a single value, e.g. `point: /mnt/data`. `env.expose` is the one list setting: `expose: [HOME, USER]` and `expose: HOME,USER` both work.
+
+### `error: cannot parse /etc/sluice/config.yaml at line 3, column 9: ...`
+
+The config file isn't valid YAML. The message gives the position and the problem but not the line's text, which could hold a secret. Open the file at that line; a missing space after a `:` or a tab used for indentation are the usual causes.
+
+### `error: cannot read secrets directory /run/secrets: ...` or `cannot read secret 'NAME' in /run/secrets: ...`
+
+At mount time, `secrets.dir` exists but isn't a readable directory, or a file in it can't be read or isn't UTF-8 text. Check the path, the owner and mode (the process runs as uid 1000 / the `sluice` user), and that each secret file is text. A missing directory is not an error: it means no secrets. sluice 0.1.2 and earlier started these messages with `secrets.dir:`.
 
 ### `error: env.expose: not set in the environment: NAME`
 

@@ -1,7 +1,8 @@
 """What a middleware sees: the per-call `Context`, its arguments and results, and `MountConfig`.
 
 `MountConfig` is read once at mount time (environment allowlist and secret files) and shared by
-every call; nothing here does I/O per call.
+every call; nothing here does I/O per call. `Secret` and the secrets-directory reader are
+interpose's (design 0003).
 """
 
 from __future__ import annotations
@@ -15,37 +16,13 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
+from interpose.secret import Secret, read_secret_dir
+
 from sluice.config import Config, ConfigError
 
 if TYPE_CHECKING:
     from sluice.backend import BackendView
     from sluice.routing import Resolution, Route
-
-MASK = "********"
-
-
-class Secret:
-    """A secret value. `str()` and `repr()` are masked; `reveal()` gives the value."""
-
-    __slots__ = ("_value",)
-
-    def __init__(self, value: str) -> None:
-        self._value = value
-
-    def reveal(self) -> str:
-        return self._value
-
-    def __repr__(self) -> str:
-        return f"Secret({MASK!r})"
-
-    def __str__(self) -> str:
-        return MASK
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, Secret) and other._value == self._value
-
-    def __hash__(self) -> int:
-        return hash(self._value)
 
 
 @dataclass(frozen=True)
@@ -63,28 +40,7 @@ def load_mount_config(cfg: Config, environ: Mapping[str, str] | None = None) -> 
     if missing:
         raise ConfigError(f"env.expose: not set in the environment: {', '.join(missing)}")
     exposed = {name: env[name] for name in cfg.env_expose}
-    return MountConfig(env=MappingProxyType(exposed), secret=_read_secrets(cfg.secrets_dir))
-
-
-def _read_secrets(directory: Path) -> Mapping[str, Secret]:
-    try:
-        names = sorted(os.listdir(directory))
-    except FileNotFoundError:
-        return MappingProxyType({})
-    except OSError as e:
-        raise ConfigError(f"secrets.dir: cannot read {directory}: {e.strerror}") from e
-    secrets: dict[str, Secret] = {}
-    for name in names:
-        path = directory / name
-        # Kubernetes secret volumes hold `..data` and timestamped directories next to the files.
-        if name.startswith(".") or not path.is_file():
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as e:
-            raise ConfigError(f"secrets.dir: cannot read secret {name!r}: {e}") from e
-        secrets[name] = Secret(text.removesuffix("\n").removesuffix("\r"))
-    return MappingProxyType(secrets)
+    return MountConfig(env=MappingProxyType(exposed), secret=read_secret_dir(cfg.secrets_dir))
 
 
 @dataclass(frozen=True)

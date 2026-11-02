@@ -16,7 +16,9 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
-from sluice.context import MASK, MountConfig
+from interpose.secret import MASK
+
+from sluice.context import MountConfig
 from sluice.errors import FsError, RouteError
 from sluice.middleware import Middleware, as_middleware, check_coroutine
 from sluice.virtual import VirtualHandler
