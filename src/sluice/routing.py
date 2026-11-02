@@ -20,7 +20,15 @@ from interpose.secret import MASK
 
 from sluice.context import MountConfig
 from sluice.errors import FsError, RouteError
-from sluice.middleware import Middleware, as_middleware, check_coroutine
+from sluice.middleware import (
+    Middleware,
+    MwEntry,
+    MwPipeline,
+    as_middleware,
+    check_coroutine,
+    entry,
+    pipeline,
+)
 from sluice.virtual import VirtualHandler
 
 if TYPE_CHECKING:
@@ -208,11 +216,16 @@ class Node:
     virtual: bool
     handler: VirtualHandler | None
     direct_io: bool
+    # The full chain from the root, global first, frozen once: what every call resolved to this
+    # node runs. One entry per registration, shared with the descendants.
+    pipeline: MwPipeline
 
     @property
     def rank(self) -> tuple[int, ...]:
         return (*(int(s.kind) for s in self.segments), _END)
 
+
+_UNBUILT = pipeline(())  # A node's pipeline until compile_table's second pass sets it
 
 ResolutionKind = Literal["backed", "virtual", "synthetic"]
 
@@ -226,6 +239,7 @@ class Resolution:
     chain: tuple[Node, ...]  # Root first, the matched route last
     params: Mapping[str, str]
     middlewares: tuple[Middleware, ...]
+    pipeline: MwPipeline  # The matched route's frozen chain (`middlewares`, as entries)
     param_specs: tuple[ParamSpec, ...]  # The `param()` callbacks to run, in registration order
     tail: tuple[str, ...]  # Path segments below the matched route
     children: tuple[str, ...]  # Literal names of child routes listed in this directory
@@ -344,6 +358,7 @@ class RouteTable:
             chain=tuple(chain),
             params=MappingProxyType(params),
             middlewares=tuple(mw for n in chain for mw in n.middlewares),
+            pipeline=node.pipeline,
             param_specs=tuple(p for p in self.params if p.func and p.name in params),
             tail=tuple(tail),
             children=tuple(listed),
@@ -455,6 +470,14 @@ def compile_table(
             virtual=route.virtual,
             handler=route.handler,
             direct_io=route.direct_io,
+            pipeline=_UNBUILT,
         )
 
-    return RouteTable(build(root, frozenset(), False), params, config)
+    def attach(node: Node, inherited: tuple[MwEntry, ...]) -> Node:
+        # A second pass, once the whole tree has validated, so a broken tree reports the same
+        # first error as before pipelines existed.
+        entries = (*inherited, *(entry(m) for m in node.middlewares))
+        children = tuple(attach(c, entries) for c in node.children)
+        return replace(node, children=children, pipeline=pipeline(entries))
+
+    return RouteTable(attach(build(root, frozenset(), False), ()), params, config)

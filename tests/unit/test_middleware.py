@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from sluice import Context, Deny, FsError, Middleware, MountConfig, Sluice
-from sluice.middleware import run_pipeline
+from sluice.middleware import POLICY, run_pipeline
 from sluice.routing import RouteTable
 
 
@@ -471,3 +471,163 @@ def test_function_middleware_repr() -> None:
     names = [repr(m) for m in res.middlewares]
     assert names[0].endswith("gate")
     assert names[1:] == ["Recorder"]
+
+
+# The interpose pipeline core (design 0004): built once per route, today's behaviour unchanged.
+
+
+def test_policy_is_sluices_semantics() -> None:
+    assert POLICY.on_error == "fail"
+    assert POLICY.after_order == "reverse"
+    assert POLICY.after_local is True
+    assert POLICY.observe_failed is True
+    assert POLICY.timeout is None  # no timeout until a record decides one
+    assert POLICY.answers == (FsError,)
+    assert POLICY.skip_inherited is None  # see the two tests below
+
+
+def test_pipeline_is_frozen_per_route_and_shares_inherited_entries() -> None:
+    async def gate(ctx: Context) -> None:
+        return None
+
+    app = Sluice()
+    app.use(gate)
+    home = app.route("/h/{user}", backend="/srv/{user}", middlewares=[Recorder("r", [])])
+    home.route("private", middlewares=[Recorder("p", [])])
+    table = app.freeze()
+    a, b = table.resolve("/h/a/x"), table.resolve("/h/b/y")
+    private = table.resolve("/h/a/private/z")
+    assert a is not None and b is not None and private is not None
+    assert a.pipeline is b.pipeline  # built at freeze time, not per call
+    assert private.pipeline is not a.pipeline
+    # The child's chain reuses its ancestors' entries: one entry per registration.
+    assert private.pipeline.entries[:2] == a.pipeline.entries
+    assert [e.middleware for e in private.pipeline.entries] == list(private.middlewares)
+    # Named as `sluice routes` and the logs name them.
+    assert [e.name for e in private.pipeline.entries] == [repr(m) for m in private.middlewares]
+    assert all(e.on_error is None and e.timeout is None for e in private.pipeline.entries)
+
+
+def test_the_same_middleware_twice_runs_twice() -> None:
+    log: list[str] = []
+    twice = Recorder("t", log)
+    assert run(context(make(twice, twice))) == b"data"
+    assert log == ["pre:t", "pre:t", "post:t", "post:t"]
+
+
+def test_a_hook_set_on_the_instance_runs() -> None:
+    log: list[str] = []
+
+    async def gate(ctx: Context) -> None:
+        log.append("gate")
+        raise Deny()
+
+    mw = Middleware()
+    mw.pre = gate  # type: ignore[method-assign]  # the instance attribute is what's tested
+    with pytest.raises(FsError) as e:
+        run(context(make(mw)))
+    assert e.value.errno == errno.EACCES
+    assert log == ["gate"]
+
+
+def _responding_param(table_routes: Callable[[Sluice], None]) -> RouteTable:
+    async def answer(ctx: Context, raw: Any) -> Any:
+        ctx.respond(b"from-param")
+        return raw
+
+    app = Sluice()
+    app.param("p", answer)
+    table_routes(app)
+    return app.freeze()
+
+
+def test_a_respond_in_param_stops_after_the_first_pre() -> None:
+    log: list[str] = []
+
+    class PostOnly(Recorder):
+        pre = Middleware.pre
+
+    def routes(app: Sluice) -> None:
+        chain = [PostOnly("a", log), Recorder("b", log)]
+        app.route("/t/{p}", backend="/b", middlewares=chain)
+
+    ctx = context(_responding_param(routes), "/t/x/f")
+    assert run(ctx) == b"from-param"
+    assert log == ["post:a"]
+
+
+def test_a_respond_in_a_target_param_with_no_chain_does_not_skip_the_op() -> None:
+    def routes(app: Sluice) -> None:
+        app.route("/s", backend="/s")
+        app.route("/t/{p}", backend="/b")
+
+    table = _responding_param(routes)
+
+    async def op(ctx: Context) -> bytes:
+        return b"op"
+
+    src, dst = context(table, "/s/f", "rename"), context(table, "/t/x/f", "rename")
+    assert run(src, op, also=[dst]) == b"op"
+
+
+def test_a_pre_failure_is_logged_once(caplog: pytest.LogCaptureFixture) -> None:
+    log: list[str] = []
+    with pytest.raises(FsError) as e:
+        run(context(make(Probe("a", log), Boom("x", log))))
+    assert e.value.errno == errno.EIO
+    errors = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert [r.getMessage() for r in errors] == ["read /t/alice/T0k/f: unexpected error in pre [c1]"]
+    assert errors[0].exc_info is not None and isinstance(errors[0].exc_info[1], RuntimeError)
+
+
+def test_a_post_failure_is_logged_once_as_post(caplog: pytest.LogCaptureFixture) -> None:
+    with pytest.raises(FsError) as e:
+        run(context(make(BrokenPost("x", []))))
+    assert e.value.errno == errno.EIO
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert errors == ["read /t/alice/T0k/f: unexpected error in post [c1]"]
+
+
+def test_a_deny_is_an_answer_and_not_logged(caplog: pytest.LogCaptureFixture) -> None:
+    with pytest.raises(FsError) as e:
+        run(context(make(Gate("g", []))))
+    assert e.value.errno == errno.EACCES
+    assert not [r for r in caplog.records if r.levelname == "ERROR"]
+
+
+def test_failed_hook_errors_name_the_hook_and_its_own_context(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class Noisy(Middleware):
+        async def failed(self, ctx: Context, error: FsError) -> None:
+            raise Deny()  # an answer elsewhere, but `failed` can't change the outcome
+
+    app = Sluice()
+    app.route("/a", backend="/a")
+    app.route("/b", backend="/b", middlewares=[Noisy()])
+    table = app.freeze()
+
+    def ctx(path: str, cid: str) -> Context:
+        res = table.resolve(path)
+        assert res is not None
+        return Context("rename", res, config=MountConfig(), correlation_id=cid)
+
+    src, dst = ctx("/a/f", "s"), ctx("/b/f", "d")
+
+    async def op(ctx: Context) -> None:
+        raise FsError(errno.ENOSPC)
+
+    with pytest.raises(FsError) as e:
+        run(src, op, also=[dst])
+    assert e.value.errno == errno.ENOSPC
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert errors == ["Noisy.failed raised [d]; ignored"]
+
+
+def test_an_ops_filter_that_raises_escapes_the_call() -> None:
+    class Odd(Middleware):
+        def applies(self, op: str) -> bool:
+            raise RuntimeError("bad filter")
+
+    with pytest.raises(RuntimeError, match="bad filter"):
+        run(context(make(Odd())))

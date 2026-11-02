@@ -3,6 +3,10 @@
 One call: `param()` callbacks → `pre` hooks (chain order) → the operation → `post` hooks
 (reverse order). `failed` hooks observe any failure. Every hook is `async`: one event loop serves
 the whole mount, so a hook that blocks stalls every call.
+
+The loop and the guard around each hook come from `interpose.pipeline` (design 0004), driven by
+`POLICY`: sluice's own semantics, written down. Hook names, selection by `ops`, `param()`, the
+errno a failure becomes and the log lines stay here.
 """
 
 from __future__ import annotations
@@ -14,6 +18,8 @@ import socket
 import ssl
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any
+
+from interpose.pipeline import Entry, Failure, HookFailed, Pipeline, Policy
 
 from sluice.errors import FsError, RouteError
 
@@ -91,6 +97,38 @@ class FunctionMiddleware(Middleware):
         return getattr(self.fn, "__qualname__", repr(self.fn))
 
 
+# sluice's answers to interpose's pipeline questions (interpose design 0003), all today's
+# behaviour: a failing hook fails the call (with an errno, below); post hooks run in reverse,
+# also after a ctx.respond(); `failed` reaches every hook that ran, its own failure included;
+# an FsError (Deny) is a hook's answer, not a failure. No timeout: that needs its own record.
+# No `skip_inherited`: it looks at the class only, so a hook set on the instance would be
+# skipped (an authorisation `pre` among them), and a skipped `pre` isn't followed by the
+# `ctx.responded` check (design 0004).
+POLICY = Policy(
+    on_error="fail",
+    after_order="reverse",
+    after_local=True,
+    observe_failed=True,
+    answers=(FsError,),
+)
+
+MwEntry = Entry[Middleware]
+MwPipeline = Pipeline[Middleware]
+
+
+def entry(mw: Middleware) -> MwEntry:
+    """One registration of a middleware in the route tree, built once at freeze time.
+
+    Named by its `repr`, the name `sluice routes` and the logs already use (a class name, or a
+    plain function's qualified name). No per-middleware `on_error` or timeout: the project's.
+    """
+    return Entry(mw, repr(mw) or type(mw).__name__)
+
+
+def pipeline(entries: Sequence[MwEntry]) -> MwPipeline:
+    return Pipeline(entries, POLICY)
+
+
 def check_coroutine(fn: object, where: str) -> None:
     if not inspect.iscoroutinefunction(fn):
         raise RouteError(f"{where}: {fn!r} must be an async function (async def)")
@@ -142,12 +180,41 @@ def _as_fs_error(ctx: Context, e: Exception, stage: str) -> FsError:
     return FsError(errno.EIO)
 
 
-async def _failed(ran: Sequence[tuple[Middleware, Context]], error: FsError) -> None:
-    for mw, ctx in reversed(ran):
-        try:
-            await mw.failed(ctx, error)
-        except Exception:
-            log.exception("%r.failed raised [%s]; ignored", mw, ctx.correlation_id)
+class _Report:
+    """`on_failure` for one call. A failure under "fail" ends the call and is logged once, by
+    `_as_fs_error`; only one the pipeline carried on from (a `failed` hook's) is logged here,
+    with the context of the hook that raised it."""
+
+    def __init__(self, ctx: Context) -> None:
+        self.ctx = ctx
+
+    def __call__(self, failure: Failure) -> None:
+        if failure.action == "skip":
+            log.error(
+                "%s.%s raised [%s]; ignored",
+                failure.middleware,
+                failure.hook,
+                self.ctx.correlation_id,
+                exc_info=failure.error,
+            )
+
+
+def _selected(ctx: Context) -> list[MwEntry]:
+    # Selected here rather than by `start(select=)`, so an `ops` filter that raises does what it
+    # always did (escapes the call) instead of becoming a hook failure.
+    return [e for e in ctx.resolution.pipeline.entries if e.middleware.applies(ctx.op)]
+
+
+def _responded(ctx: Context) -> Callable[[object], bool]:
+    return lambda _: ctx.responded
+
+
+async def _pre(mw: Middleware, ctx: Context) -> None:
+    await mw.pre(ctx)
+
+
+async def _post(mw: Middleware, ctx: Context, result: Any) -> Any:
+    return await mw.post(ctx, result)
 
 
 async def run_params(ctx: Context, specs: Sequence[ParamSpec]) -> None:
@@ -171,45 +238,55 @@ async def run_pipeline(
     as well.
     A `ctx.respond()` on either side stops the remaining `pre` hooks and skips the operation.
     Every hook that ran `pre` gets `post` or `failed` with the same context.
+
+    The loop and the guard around each hook are interpose's (`Pipeline`, frozen per route);
+    what a failure means (an errno), selection by `ops`, `param()` and logging stay here.
     """
-    chain = [mw for mw in ctx.resolution.middlewares if mw.applies(ctx.op)]
-    ran: list[tuple[Middleware, Context]] = []
-    # Who `failed` reaches. A param() failure comes before its chain's pre hooks; let the whole
-    # chain observe it, as well as the hooks that already ran.
-    observers: Sequence[tuple[Middleware, Context]] = [(mw, ctx) for mw in chain]
+    chain = _selected(ctx)
+    report = _Report(ctx)
+    run = ctx.resolution.pipeline.start(on_failure=report, state=ctx.state)
+    # Who `failed` reaches when it isn't everything that ran (`run.ran`): a param() failure
+    # comes before its chain's pre hooks, so the whole chain observes it, as well as the hooks
+    # that already ran.
+    observers: list[tuple[MwEntry, Context]] | None = [(e, ctx) for e in chain]
     stage = "param()"
     try:
         await run_params(ctx, ctx.resolution.param_specs)
-        stage, observers = "pre", ran
-        for mw in chain:
-            ran.append((mw, ctx))
-            await mw.pre(ctx)
-            if ctx.responded:
-                break
+        stage, observers = "pre", None
+        await run.before("pre", ctx, _pre, entries=chain, until=_responded(ctx))
         responder = ctx if ctx.responded else None
         for other in also:
             if responder is not None:
                 break
-            other_chain = [mw for mw in other.resolution.middlewares if mw.applies(other.op)]
-            stage, observers = "param()", [*ran, *((mw, other) for mw in other_chain)]
+            other_chain = _selected(other)
+            stage, observers = "param()", [*run.ran, *((e, other) for e in other_chain)]
             await run_params(other, other.resolution.param_specs)
-            stage, observers = "pre", ran
-            for mw in other_chain:
-                ran.append((mw, other))
-                await mw.pre(other)
-                if other.responded:
-                    responder = other
-                    break
+            stage, observers = "pre", None
+            # Only a respond() seen after a pre hook ends the call here, as it always has: a
+            # target chain with no middleware never checks.
+            stopped = await run.before(
+                "pre", other, _pre, entries=other_chain, until=_responded(other)
+            )
+            if stopped is not None:
+                responder = other
         if responder is None:
             stage = "operation"
             result = await operation(ctx)
         else:
             result = responder.response
         stage = "post"
-        for mw, mw_ctx in reversed(ran):
-            result = await mw.post(mw_ctx, result)
+        result = await run.after("post", result, _post)
     except Exception as e:
-        error = _as_fs_error(ctx, e, stage)
-        await _failed(observers, error)
-        raise error from e
+        # A hook's failure arrives as HookFailed: map what the hook raised, as if it had
+        # escaped the hook, so errno mapping and its one log line are what they always were.
+        cause = e.failure.error if isinstance(e, HookFailed) else e
+        error = _as_fs_error(ctx, cause, stage)
+
+        async def notify(mw: Middleware, c: Context) -> None:
+            report.ctx = c
+            await mw.failed(c, error)
+
+        pairs = None if observers is None else list(reversed(observers))
+        await run.observe_ran("failed", notify, pairs=pairs)
+        raise error from cause
     return result
