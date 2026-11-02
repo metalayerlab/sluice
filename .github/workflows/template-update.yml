@@ -1,7 +1,7 @@
 # Template-owned: template-base. Weekly: pull each template's latest release into this
 # repo with `copier update`, one PR per template, so each one keeps its own blast radius
 # and can be reverted on its own. Base first, then the stack overlay, then feature
-# overlays by name. Conflicts are left inline as <<<<<<< markers for the reviewer.
+# overlays by name. Conflicts are left inline as <<<<<<< markers, listed in the PR.
 #
 # Uses the release GitHub App when RELEASE_APP_CLIENT_ID is set (so CI runs on
 # the PR, a private template can be read, and workflow files can be pushed).
@@ -97,6 +97,23 @@ jobs:
             echo "POST_UPDATE_FAILED=1" >> "$GITHUB_ENV"
           fi
 
+      # Copier leaves each conflicted file unmerged in git's index, and the PR step
+      # can't check out over that: stage them, markers and all. The PR body lists
+      # them, and scripts/checks.d/00-base.sh fails CI until they're resolved.
+      - name: scripts/stage-conflicts.sh
+        run: |
+          conflicts=$(sh scripts/stage-conflicts.sh)
+          if [ -n "$conflicts" ]; then
+            echo "::warning::conflicts to resolve: $(echo "$conflicts" | tr "\n" " ")"
+            {
+              echo "CONFLICTS_NOTE<<CONFLICTS_NOTE_EOF"
+              echo "**Conflicts to resolve before merging.** These files have inline \`<<<<<<<\` markers, and CI fails until they're gone:"
+              echo
+              echo "$conflicts" | while IFS= read -r path; do echo "- \`$path\`"; done
+              echo "CONFLICTS_NOTE_EOF"
+            } >> "$GITHUB_ENV"
+          fi
+
       # Copier copies files, not labels; the issue and the PR below need this one.
       - name: The template-update label exists
         env:
@@ -126,9 +143,13 @@ jobs:
           commit-message: "chore: update from ${{ env.TEMPLATE }} ${{ env.TO }}"
           title: "chore: update from ${{ env.TEMPLATE }} ${{ env.TO }}"
           labels: template-update
+          # The title stays a clean Conventional Commit: it becomes the squash commit.
           body: |
             `copier update` from ${{ env.TEMPLATE }} **${{ env.FROM }}** to **${{ env.TO }}**.
-            ${{ env.POST_UPDATE_FAILED == '1' && '**`scripts/post-update.sh` failed after the update** (see the workflow log): resolve any conflicts, run it, and commit what it changes.' || '' }}
+
+            ${{ env.CONFLICTS_NOTE }}
+
+            ${{ env.POST_UPDATE_FAILED == '1' && (env.CONFLICTS_NOTE != '' && '**`scripts/post-update.sh` failed after the update**, probably on those markers (see the workflow log): once they are resolved, run it and commit what it changes.' || '**`scripts/post-update.sh` failed after the update** (see the workflow log): run it and commit what it changes.') || '' }}
 
             - Search the diff for `<<<<<<<`: conflicts are left inline for you to resolve.
             - Read the template's release notes for what changed and why.
