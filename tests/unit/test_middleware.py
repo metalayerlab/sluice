@@ -486,7 +486,7 @@ def test_policy_is_sluices_semantics() -> None:
     assert POLICY.observe_failed is True
     assert POLICY.timeout is None  # pipeline.timeout_ms is off by default (design 0006)
     assert POLICY.answers == (FsError,)
-    assert POLICY.skip_inherited is None  # see the two tests below
+    assert POLICY.skip_inherited is Middleware  # design 0008; see the tests below
 
 
 def test_pipeline_is_frozen_per_route_and_shares_inherited_entries() -> None:
@@ -843,3 +843,66 @@ def test_a_late_result_fails_closed_and_says_why(
     assert ran == []  # the late result is discarded, never acted on
     expected = f"read /t/alice/T0k/f: Late.pre timed out after 0.02s ({why}) [c1]"
     assert expected in [r.getMessage() for r in caplog.records]
+
+
+# skip_inherited (design 0008): hooks left as the base class's no-ops aren't called
+
+
+def test_hooks_a_middleware_does_not_override_are_not_timed() -> None:
+    class PreOnly(Middleware):
+        def __repr__(self) -> str:
+            return "PreOnly"
+
+        async def pre(self, ctx: Context) -> None:
+            return None
+
+    class FailedOnly(Middleware):
+        def __repr__(self) -> str:
+            return "FailedOnly"
+
+        async def failed(self, ctx: Context, error: FsError) -> None:
+            return None
+
+    metrics = Metrics()
+    app = Sluice()
+    app.route("/t/{user}/{token}", backend="/b/{user}", middlewares=[PreOnly(), FailedOnly()])
+    assert run(context(app.freeze(metrics=metrics))) == b"data"
+    timed = {values[0] for values in metrics.middleware_seconds.samples()}
+    # FailedOnly's pre and post are the base no-ops: never called, so never timed.
+    assert timed == {"PreOnly"}
+
+
+def test_a_failed_only_middleware_still_observes_a_failure() -> None:
+    seen: list[int] = []
+
+    class FailedOnly(Middleware):
+        async def failed(self, ctx: Context, error: FsError) -> None:
+            seen.append(error.errno)
+
+    async def op(ctx: Context) -> None:
+        raise FsError(errno.ENOSPC)
+
+    with pytest.raises(FsError):
+        run(context(make(FailedOnly())), op)
+    assert seen == [errno.ENOSPC]
+
+
+def test_a_respond_in_param_still_skips_the_operation_with_a_post_only_chain() -> None:
+    # Every pre is skipped here; the ctx.responded check must still run after each one.
+    log: list[str] = []
+
+    class PostOnly(Recorder):
+        pre = Middleware.pre
+
+    def routes(app: Sluice) -> None:
+        app.route("/t/{p}", backend="/b", middlewares=[PostOnly("a", log), PostOnly("b", log)])
+
+    ran: list[str] = []
+
+    async def op(ctx: Context) -> bytes:
+        ran.append("op")
+        return b"op"
+
+    assert run(context(_responding_param(routes), "/t/x/f"), op) == b"from-param"
+    assert ran == []
+    assert log == ["post:a"]

@@ -104,15 +104,16 @@ class FunctionMiddleware(Middleware):
 # fails the call (with an errno, below); post hooks run in reverse, also after a ctx.respond();
 # `failed` reaches every hook that ran, its own failure included; an FsError (Deny) is a hook's
 # answer, not a failure. No timeout here: `pipeline.timeout_ms` sets one (`policy()`, design
-# 0006). No `skip_inherited`: it looks at the class only, so a hook set on the instance would be
-# skipped (an authorisation `pre` among them), and a skipped `pre` isn't followed by the
-# `ctx.responded` check (design 0004).
+# 0006). `skip_inherited=Middleware` (design 0008): a hook a middleware leaves as the base class's
+# no-op isn't called or timed; one set on the instance still counts as its own (interpose 0.1.3),
+# and a skipped `pre` is still followed by the `ctx.responded` check.
 POLICY = Policy(
     on_error="fail",
     after_order="reverse",
     after_local=True,
     observe_failed=True,
     answers=(FsError,),
+    skip_inherited=Middleware,
 )
 
 MwEntry = Entry[Middleware]
