@@ -19,7 +19,7 @@ CI runs the unit tests on every supported Python version, together with ruff, my
 | `tests/conftest.py` | Shared fixtures: `clean_env` (no `SLUICE_*` leakage), `write_config` |
 | `tests/unit/test_config.py` | sluice's settings: the keys and variables (pinned), defaults, each source end to end, `check=` limits, the `env.expose` rules. The engine's coercion rules are interpose's, and tested there |
 | `tests/unit/test_routing.py` | Patterns, specificity, the three backend states, synthetic directories, templates, every `freeze()` validation error |
-| `tests/unit/test_middleware.py` | Pipeline order, short-circuit, `failed`, fail-closed `post`, `param()` callbacks, two-path `rename` |
+| `tests/unit/test_middleware.py` | Pipeline order, short-circuit, `failed`, fail-closed `post`, `param()` callbacks, two-path `rename`; the interpose `POLICY`, pipelines frozen per route, un-overridden hooks not awaited, one log line per failure |
 | `tests/examples/` | One test file per `examples/` middleware, through the `Dispatcher`. `conftest.py` puts `examples/` on `sys.path` and has the `mount`, `walk`, `cat` and `ls` helpers. Core tests never import an example: they define the small middleware they need. Coverage counts `sluice` only |
 | `tests/unit/test_dispatch.py` | The `Dispatcher` end to end against a temporary directory: the requirements' four example apps, readdir merging, rename, open files that outlive unlink or replace, cleanup of failed opens |
 | `tests/unit/test_inodes.py`, `test_app.py`, `test_mount.py`, `test_cli.py` | The inode table; app loading, `MountConfig` and secrets, virtual handler defaults; mount-point checks and signal handling; the commands |
