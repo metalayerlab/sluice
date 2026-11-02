@@ -18,7 +18,9 @@ stack_answers:
     container_image: true
     image_extras:
     - fuse
-    integration_ci: false
+    integration_ci: true
+    integration_extras:
+    - fuse
     kind: cli
     package_name: sluice
     python_version: '3.13'
