@@ -20,3 +20,4 @@ the team (and its AI assistants) should know at a glance.
 - Own settings engine or `Secret` beside interpose: the copies drift; mechanism lives in interpose (design 0003).
 - Pinning interpose via `[tool.uv.sources]` only: a built wheel would look `interpose` up on PyPI (design 0003).
 - `env.expose` name rules in interpose: sluice policy, not mechanism (design 0003).
+- `skip_inherited` in sluice's `POLICY`, for now: slower per call on interpose v0.1.5; retry once metalayerlab/interpose#25 ships (design 0009).
