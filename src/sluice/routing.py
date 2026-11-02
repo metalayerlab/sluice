@@ -503,7 +503,11 @@ def compile_table(
     def attach(node: Node, inherited: tuple[MwEntry, ...]) -> Node:
         # A second pass, once the whole tree has validated, so a broken tree reports the same
         # first error as before pipelines existed.
-        entries = (*inherited, *(entry(m) for m in node.middlewares))
+        chain = list(inherited)
+        for m in node.middlewares:
+            # Unique within the chain (design 0007): an ancestor's entries keep their names.
+            chain.append(entry(m, {e.name for e in chain}))
+        entries = tuple(chain)
         children = tuple(attach(c, entries) for c in node.children)
         return replace(node, children=children, pipeline=pipeline(entries, rules))
 
