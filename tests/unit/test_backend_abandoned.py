@@ -6,6 +6,7 @@ A hung backend (a stale NFS mount) is simulated by a function that blocks on a
 
 import asyncio
 import errno
+import logging
 import os
 import threading
 import time
@@ -44,6 +45,23 @@ def hang() -> Iterator[Hang]:
     h = Hang()
     yield h
     h.release()  # Never leave a pool thread blocked past the test
+
+
+class Logged(logging.Handler):
+    """Sets `seen` when a record containing `text` is logged, from whichever thread logs it.
+
+    A worker thread drops the abandoned count before it logs the recovery, so polling the
+    count and then reading the log races the logging thread (#80): wait for the record itself.
+    """
+
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self.text = text
+        self.seen = threading.Event()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if self.text in record.getMessage():
+            self.seen.set()
 
 
 def until(condition: Callable[[], bool]) -> None:
@@ -114,6 +132,9 @@ def test_at_the_cap_calls_fail_fast_with_eio_then_recover(
     metrics = Metrics()
     io = Passthrough(4, max_abandoned=2, metrics=metrics)
     second = Hang()
+    recovered = Logged("accepting backend calls again")
+    logger = logging.getLogger(backend_module.__name__)
+    logger.addHandler(recovered)
 
     async def refused() -> int:
         with pytest.raises(FsError) as e:
@@ -135,11 +156,12 @@ def test_at_the_cap_calls_fail_fast_with_eio_then_recover(
         assert "sluice_backend_refused_total 2" in text
 
         hang.release()
-        until(lambda: io.abandoned == 1)
-        assert "accepting backend calls again" in caplog.text
+        assert recovered.seen.wait(5), "recovery never logged"
+        assert io.abandoned == 1  # The count drops before the recovery is logged
         assert asyncio.run(io.run(os.getpid)) == os.getpid()
         assert "sluice_backend_abandoned 1" in metrics.render().decode()
     finally:
+        logger.removeHandler(recovered)
         second.release()
         io.shutdown()
 
