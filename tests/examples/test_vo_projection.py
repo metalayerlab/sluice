@@ -219,17 +219,17 @@ def test_every_write_is_refused(d: Dispatcher, pilot: dict[str, Any]) -> None:
     for leaf in leaves:
         inode = run(walk(d, leaf))
         for flags in (os.O_WRONLY, os.O_RDWR, os.O_RDONLY | os.O_TRUNC):
-            assert errno_of(d.open(inode, flags)) == errno.EROFS
-        assert errno_of(d.setattr(inode, SetattrArgs(size=0))) == errno.EROFS
-        assert errno_of(d.setattr(inode, SetattrArgs(mode=0o644))) == errno.EROFS
+            assert errno_of(d.open(inode, flags)) == errno.EACCES
+        assert errno_of(d.setattr(inode, SetattrArgs(size=0))) == errno.EACCES
+        assert errno_of(d.setattr(inode, SetattrArgs(mode=0o644))) == errno.EACCES
         assert not run(d.access(inode, os.W_OK))
     for directory in (ROOT, f"{ROOT}/seed", f"{ROOT}/results"):
         inode = run(walk(d, directory))
-        assert errno_of(d.create(inode, "new", 0o644, os.O_WRONLY)) == errno.EROFS
-        assert errno_of(d.mkdir(inode, "new", 0o755)) == errno.EROFS
+        assert errno_of(d.create(inode, "new", 0o644, os.O_WRONLY)) == errno.EPERM
+        assert errno_of(d.mkdir(inode, "new", 0o755)) == errno.EPERM
     root = run(walk(d, ROOT))
-    assert errno_of(d.unlink(root, "name")) == errno.EROFS
-    assert errno_of(d.rmdir(root, "seed")) == errno.EROFS
+    assert errno_of(d.unlink(root, "name")) == errno.EPERM
+    assert errno_of(d.rmdir(root, "seed")) == errno.EPERM
     assert errno_of(d.rename(root, "name", root, "title")) == errno.EXDEV
     model = OrgModel()
     for pointer in ("/name", f"/seed/{key}", "/template/name", "/results"):
@@ -267,7 +267,7 @@ def test_an_atomic_replace_by_the_engine_is_reloaded(
     assert run(cat(d, f"{result}/ran")) == b"true\n"
     assert run(cat(d, f"{result}/started_at")) == b"2026-11-04T09:30:00+00:00\n"
     assert run(cat(d, f"{ROOT}/updated")) == render(record["updated"])
-    assert errno_of(d.open(run(walk(d, f"{result}/status")), os.O_WRONLY)) == errno.EROFS
+    assert errno_of(d.open(run(walk(d, f"{result}/status")), os.O_WRONLY)) == errno.EACCES
 
 
 @integration

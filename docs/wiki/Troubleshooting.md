@@ -104,6 +104,16 @@ sluice 0.1.1 and earlier: during a `rename`, a `ctx.respond()` from a `pre` hook
 
 A `pre` hook or `param()` callback denied the call (the example `auth()` with a `verify` that returned False, or a `Deny`). The access log shows the op and path that got `EACCES`. `sluice resolve <path> --op <op>` lists the middleware that runs there.
 
+### A write to a YAML projection fails with `Invalid argument`, `Permission denied`, `Device or resource busy` or `Input/output error`
+
+The example YAML projection (`examples/yaml_projection.py`) refuses a write that would change the document into something its model rejects, and leaves the file as it was. The log says why, at warning: `write refused: <code> at <JSON Pointer>: <message>` (never the value). See [Writing an App](Writing-an-App#example-middleware) for the full table.
+
+- `Invalid argument` (`EINVAL`): the value doesn't cast to the leaf's type (`yes` for a boolean, `012` or `+1` for an integer, `2026-1-5` for a date, an empty file for anything but a null leaf) or isn't UTF-8 (code `cast`), or the model's `validate` has a finding for the changed document (its own code). `echo` sees it at the write; a later write in the same file (not at offset 0) is checked only at `close`, so check the log or the exit status of `close`.
+- `Permission denied` (`EACCES`): the model doesn't make that leaf writable (mode 0444), or it is a secret reference, which is never writable. Check the leaf's mode with `ls -l`.
+- `Device or resource busy` (`EBUSY`, code `changed`): another writer changed the file on disk since the projection loaded it. The projection reloads it and leaves their change in place; read the leaf again and retry.
+- `Input/output error` (`EIO`, code `load-back` or `dump`): the model's `dump` wrote text its `load` doesn't read back equal. A bug in the model, not in the value.
+- `Operation not permitted` (`EPERM`): creating, removing or renaming a key, or `chmod` and `chown`. An editor that saves by writing a new file and renaming it over the old one (vim's `backupcopy=auto` on some files) fails this way: set `backupcopy=yes`, or write with `echo`, `printf` or `tee`.
+
 ### `Too many levels of symbolic links` or `Not a directory` below a symlink
 
 sluice never follows a symlink below a backend template's literal prefix itself: that would let a link swapped into the backing store lead it outside the backend ([Security](Security#hardening)). Links still work through the mount, because the kernel follows them: a relative link to something in the same backend resolves back through sluice. The error means a directory sluice had already looked up was replaced by a link before the call reached it, by another writer in the backing store. To use a symlinked directory as a backend, put it in the literal prefix (`backend="/srv/data/{user}"` with `/srv/data` a link), or point the template at its target.
