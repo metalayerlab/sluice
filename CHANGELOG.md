@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.8](https://github.com/metalayerlab/sluice/compare/v0.2.7...v0.2.8) (2026-11-04)
+
+
+### ✨ Features
+
+* **examples:** read-only Virtual Organisations projection (design 0011 step 3) ([#82](https://github.com/metalayerlab/sluice/issues/82)) ([aa6ace4](https://github.com/metalayerlab/sluice/commit/aa6ace4b577773172bb40b957b84d0b6f9323268))
+
 ## [0.2.7](https://github.com/metalayerlab/sluice/compare/v0.2.6...v0.2.7) (2026-11-04)
 
 
