@@ -2,11 +2,12 @@
 
 <!-- Add a line for this record to the index in docs/design/README.md (CI checks). -->
 
-Status: Approved
+Status: Implemented (v0.2.13 to v0.2.14; acceptance tests ran through the test harness, not a live FUSE mount)
 Date: 2026-11-04
 Authors: Stephen Cox; drafted by Claude
 Approved: 2026-11-04 by the arbiter (question "Approve Sluice Record 0012 On YAML Write Edge Cases").
 Clarified: 2026-11-04 by the arbiter (question "Mark Sluice Record 0012 Implemented"): emptying a mixed list is allowed; the list-types refusal covers every other length change.
+Implemented: 2026-11-04, approved by the arbiter (question "Mark Sluice Record 0012 Implemented"). The first run on a real mount is to be noted here.
 Supersedes: part of [0011](0011-yaml-projection-pilot.md) (its write rules: a truncating `open` with no `write`, the type of a written list's items, and the check at a write at offset 0)
 
 This record supersedes those three points only; everything else in 0011 stands. 0011 is Implemented, so
