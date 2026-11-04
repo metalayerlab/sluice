@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.6](https://github.com/metalayerlab/sluice/compare/v0.2.5...v0.2.6) (2026-11-04)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** bump interpose from v0.3.0 to v0.4.1 ([#78](https://github.com/metalayerlab/sluice/issues/78)) ([4752e88](https://github.com/metalayerlab/sluice/commit/4752e88b9ac6a96c74186706c62c0dfc0211e62b))
+
+
+### 📚 Documentation
+
+* propose YAML projection pilot (design 0011) ([#75](https://github.com/metalayerlab/sluice/issues/75)) ([66f4d9e](https://github.com/metalayerlab/sluice/commit/66f4d9ef0965e763baee10f57c41d841505ce27e))
+
 ## [0.2.5](https://github.com/metalayerlab/sluice/compare/v0.2.4...v0.2.5) (2026-11-02)
 
 
