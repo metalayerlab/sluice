@@ -36,7 +36,7 @@ sluice's own settings hold no secrets. Your app's secrets, if it has any, are fi
 - What a secret grants is up to your app: a database password used by a config template, a key `verify()` checks tokens against.
 - **Rotating:** secrets are read once at mount time. Replace the file, then restart the mount (in Kubernetes, roll the pod). Open files on the old mount break at the restart.
 
-The example YAML projection (`examples/yaml_projection.py`) can show a document that names secrets kept elsewhere. A leaf its model marks `is_reference` shows its reference text (a `pass:` path), never the value: the projector never resolves it, never runs `pass` or any other process, and refuses every write to it with `EACCES` before it asks the model whether the leaf is writable. The projection has no access control of its own: give its route the middleware (`auth()`) the document needs.
+The example YAML projection (`examples/yaml_projection.py`) can show a document that names secrets kept elsewhere. A leaf its model marks `is_reference` shows its reference text (a `pass:` path), never the value: the projector never resolves it, never runs `pass` or any other process, and refuses every write to it with `EACCES` before it asks the model whether the leaf is writable. A leaf its model marks `writable` takes writes from anyone who can reach the route; every write is validated by the model before it reaches the file, and a refusal is logged without the value. The projection has no access control of its own: give its route the middleware (`auth()`) the document needs.
 
 ## Hardening
 
