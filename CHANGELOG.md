@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.14](https://github.com/metalayerlab/sluice/compare/v0.2.13...v0.2.14) (2026-11-04)
+
+
+### 🐛 Bug Fixes
+
+* **examples:** let a truncating write empty a mixed list (design 0012) ([#97](https://github.com/metalayerlab/sluice/issues/97)) ([c58c4da](https://github.com/metalayerlab/sluice/commit/c58c4dae41525aa51f027d429476bf86ddb6a633))
+
 ## [0.2.13](https://github.com/metalayerlab/sluice/compare/v0.2.12...v0.2.13) (2026-11-04)
 
 
