@@ -2,10 +2,11 @@
 
 <!-- Add a line for this record to the index in docs/design/README.md (CI checks). -->
 
-Status: Approved
+Status: Implemented (v0.2.7 to v0.2.10; acceptance tests ran through the test harness, not a live FUSE mount)
 Date: 2026-11-03
 Authors: Stephen Cox; drafted by Claude
 Approved: 2026-11-04 by the brain coordinator for Stephen.
+Implemented: 2026-11-04, approved by the arbiter (question "Mark Sluice Record 0011 Implemented"). The first run on a real mount is to be noted here.
 
 ## Context
 
