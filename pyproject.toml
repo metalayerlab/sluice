@@ -71,6 +71,12 @@ mypy_path = "examples"
 module = ["pyfuse3", "pyfuse3.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# virtual_organisations is a private package that CI can't install; only the example
+# examples/vo_projection.py imports it, when it is installed (design 0011).
+module = ["virtual_organisations.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers --strict-config --cov --cov-report=term-missing:skip-covered"
 testpaths = ["tests"]

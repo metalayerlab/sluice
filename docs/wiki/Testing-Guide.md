@@ -6,6 +6,8 @@
 uv run pytest                                   # unit tests, with an 80% coverage floor
 uv run pytest tests/unit/test_config.py -k env  # a subset
 RUN_INTEGRATION=1 uv run pytest -m integration  # a real FUSE mount (needs uv sync --extra fuse)
+VO_CHECKOUT=/path/to/virtual-organisations RUN_INTEGRATION=1 \
+  uv run --with "$VO_CHECKOUT" pytest -m integration --no-cov tests/examples  # the VO adapter
 ```
 
 CI runs the unit tests on every supported Python version, together with ruff, mypy (strict), the wiki checks and the manifest checks. All of them block a merge.
@@ -23,6 +25,7 @@ CI runs the unit tests on every supported Python version, together with ruff, my
 | `tests/unit/test_backend_abandoned.py` | Backend calls abandoned by a timeout, with a hung backend simulated by a `threading.Event`: queued calls aren't abandoned, the `backend.max_abandoned` cap fails calls fast and recovers, `release` is never refused, the metrics, and a hook timing out on `ctx.backend` end to end |
 | `tests/unit/test_metrics.py` | Metrics through the `Dispatcher`: what is counted (routing failures included), errno and middleware labels, no path labels, `/.sluice/metrics` (read-only, rendered per open, gated by global middleware), the reserved namespace, `prepare()` and the setting |
 | `tests/examples/` | One test file per `examples/` middleware, through the `Dispatcher`. `conftest.py` puts `examples/` on `sys.path` and has the `mount`, `walk`, `cat` and `ls` helpers. Core tests never import an example: they define the small middleware they need. Coverage counts `sluice` only |
+| `tests/examples/test_vo_projection.py` | The Virtual Organisations adapter. Its unit tests need no VO package. Its integration tests build the pilot's org record at test time from the Virtual Organisations checkout `VO_CHECKOUT` names (nothing from that private repo is kept here), with the model package importable (`uv run --with`). Without both they are deselected, not skipped, by `tests/examples/conftest.py`: CI can't install the private package, and its integration job fails on a skip, so CI never runs them |
 | `tests/unit/test_dispatch.py` | The `Dispatcher` end to end against a temporary directory: the requirements' four example apps, readdir merging, rename, open files that outlive unlink or replace, cleanup of failed opens |
 | `tests/unit/test_inodes.py`, `test_app.py`, `test_mount.py`, `test_cli.py` | The inode table; app loading, `MountConfig` and secrets, virtual handler defaults; mount-point checks and signal handling; the commands |
 | `tests/integration/test_mount.py` | `sluice mount` in a subprocess, used through the kernel; fails if the daemon logs a traceback or a token. Also mounts with `metrics.enabled` and reads `/.sluice/metrics` |

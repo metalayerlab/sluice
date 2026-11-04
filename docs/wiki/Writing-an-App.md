@@ -142,6 +142,7 @@ sluice ships no concrete middleware: the package is the mechanism, and every pol
 | `layers.py`: `Layer(source, target, classify, refresh=300)`, with `by_type`, `by_date`, `by_tag` | ShadowFS virtual layers: a `VirtualHandler` for a `{rest*}` route (`/by-type/{rest*}`) that lists views of `source` (`py/`, `2026/10/31/`, one directory per tag in the `user.tags` xattr). Each file in a view is a **relative** symlink into the backed route at `target` (`../../src/project.py`), so reads go through that route and its middleware, and the app needn't know the mountpoint. The index is scanned off the event loop on first use and rebuilt in the background after `refresh` seconds. The scan never follows a symlink. Names two files share in one view are marked with their source directory (`project@docs.py`), so a name never comes to mean a different file. A view lists names that the source route's middleware might hide, so give the view route the same middleware if names are sensitive |
 | `transform.py`: `Transform(fn, match="*", max_bytes=64 MiB, cache_bytes=64 MiB)` | ShadowFS transforms: a file whose name matches is read whole through `ctx.backend`, passed through `fn` (in a worker thread), and served as a read-only snapshot. `getattr` and listings report the transformed size, so a cold `ls -l` runs `fn` on every matching file. Outputs are cached by path, mtime and size, bounded by `cache_bytes`. A file above `max_bytes` keeps its raw size and fails to open with `EFBIG`, so nobody reads raw bytes as transformed ones. Opening a matching file for writing, truncating it or changing its attributes is `EROFS`. Several on one route form a pipeline: the last in the chain runs first |
 | `yaml_projection.py`: `Projection(DocumentStore(path, model))`, with the `Model` protocol | One YAML document as a tree ([design 0011](https://github.com/metalayerlab/sluice/blob/main/docs/design/0011-yaml-projection-pilot.md)), a `VirtualHandler` for a `{rest*}` route: mappings are directories, scalars are files, a list of scalars is one file with one item per line. A leaf's content is its value and one newline: null is empty, a float is its `repr`, dates and datetimes are ISO 8601, and the type the model declares decides, else the value's own. `getattr` reports the real size. The `Model` loads, validates and types the document; the projector never parses YAML itself. A document with findings, or with a list of mappings or of lists, is refused at mount (`DocumentError`), each finding logged at warning with its code and JSON Pointer. At each `opendir` the store reloads the file if its inode, size or mtime changed (a rename-replace counts); a replacement that doesn't validate is logged and the last good document stays. **Read-only for now:** every leaf is mode 0444, and opening for writing, `truncate`, `setattr` and every create or remove fail with `EROFS` (a rename is `EXDEV`, as on every virtual route). A leaf the model marks `is_reference` (a `pass:` path) reads as its reference text, is never resolved (no `pass`, no subprocess) and fails every write with `EACCES` |
+| `vo_projection.py`: `org_projection(path)` | The Virtual Organisations adapter for `yaml_projection.py` ([design 0011](https://github.com/metalayerlab/sluice/blob/main/docs/design/0011-yaml-projection-pilot.md), step 3): a `Projection` of one org record, its `Model` filled from the `virtual_organisations.model` package (`load_org`, `dump`, `validate_org`, each finding as its code, JSON Pointer and message). A seed value is typed by the template copy's `seed` declaration for its key; everything else by its current value. Only a version 1 record mounts: another version is refused (`DocumentError`), as is a record with findings. **Needs the private `virtual-organisations` package** installed beside the app: without it the module imports, and `org_projection` raises `ModelNotInstalled` (an `ImportError`) saying so. **Read-only for now:** nothing is writable, and version 1 has no secret references |
 
 A projection, with a model of your own (`load`, `dump`, `validate`, `type_of`, `writable`, `is_reference`; `tests/examples/test_yaml_projection.py` has a toy pyyaml one):
 
@@ -153,6 +154,22 @@ app.route("/records/widget/{rest*}", virtual=True, handler=Projection(store))
 ```
 
 `ls /mnt/records/widget` lists the top-level keys, and `cat /mnt/records/widget/address/city` prints one value.
+
+An org record from Virtual Organisations, behind the access layer (`examples/auth.py`):
+
+```python
+from auth import auth
+from vo_projection import org_projection
+
+app.route(
+    "/orgs/example-trust/{rest*}",
+    virtual=True,
+    handler=org_projection("/srv/orgs/example-trust.yaml"),
+    middlewares=[auth()],
+)
+```
+
+The record's path is the handler's own configuration: a virtual route has no backend. `ls /mnt/orgs/example-trust` lists `kind`, `version`, `org`, `name`, `status`, `template`, `seed` and `results`; `cat /mnt/orgs/example-trust/seed/<key>` prints one seed value by its declared type.
 
 ### The context
 
