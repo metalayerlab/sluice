@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.10](https://github.com/metalayerlab/sluice/compare/v0.2.9...v0.2.10) (2026-11-04)
+
+
+### ✨ Features
+
+* **examples:** seed writes in the Virtual Organisations projection (design 0011 step 5) ([#87](https://github.com/metalayerlab/sluice/issues/87)) ([718992a](https://github.com/metalayerlab/sluice/commit/718992a4336a351658831aa144d1b07ee861e319))
+
 ## [0.2.9](https://github.com/metalayerlab/sluice/compare/v0.2.8...v0.2.9) (2026-11-04)
 
 
