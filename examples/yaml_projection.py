@@ -52,13 +52,14 @@ one item per line, each cast by the rule above for its type: a declared item typ
 else the type of the current item at its position; past the end, the type of the last non-null
 item (strings if none); at a null item, an empty line stays null and other text takes the type
 the non-null items share (else a string). A list whose non-null items have more than one type
-can be edited in place, but not change its length (`list-types`).
+can be edited in place or emptied, but not change to any other length (`list-types`).
 
 What a writer sees, and why (each refusal is logged at warning with its code and JSON Pointer,
 never the value):
 
 - `EINVAL`: the content doesn't cast to the leaf's type, isn't UTF-8, changes the length of a
-  list of mixed types, or the model's `validate` has a finding for the changed document;
+  list of mixed types (other than emptying it), or the model's `validate` has a finding for the
+  changed document;
 - `EACCES`: the leaf isn't writable, or is a secret reference (checked before `writable` is
   ever consulted, at `open` and at `setattr`);
 - `EBUSY`: the file changed on disk since it was loaded (another writer): it is reloaded and
@@ -449,7 +450,8 @@ def _kind(value: Scalar | list[Scalar]) -> str:
 
 
 class ListTypesError(ValueError):
-    """A write would change the length of a list whose items have more than one type."""
+    """A write would change the length of a list whose items have more than one type, other
+    than emptying it."""
 
 
 def cast(
@@ -460,7 +462,7 @@ def cast(
     The declared type decides, else the current value's type: a null leaf takes only null (0
     bytes), a list only a list. A list's items are typed by `item` if declared, else by
     position (design 0012, case 2). Raises `ValueError` with a message that never quotes the
-    content, `ListTypesError` for a list that can't change its length.
+    content, `ListTypesError` for a mixed list written at another length (not emptied).
     """
     kind: str = declared or _kind(current)
     if not declared and current is None:
@@ -487,11 +489,13 @@ def cast(
 def _items(lines: list[str], current: list[Any], item: Type | None) -> list[Scalar]:
     """A written list's items, typed as the list they replace types them (design 0012, case 2):
     item *i* by current item *i*, past the end by the last non-null item, a null slot by the
-    type the non-null items share; a declared item type wins over all of these."""
+    type the non-null items share; a declared item type wins over all of these. A mixed list
+    keeps its length, or is emptied (design 0012, as clarified by the arbiter)."""
     kinds = [_kind(v) for v in current if v is not None]
     shared = kinds[0] if len(set(kinds)) == 1 else None
-    if not item and len(set(kinds)) > 1 and len(lines) != len(current):
-        # By position, an item would shift into a slot of another type and cast silently
+    if not item and len(set(kinds)) > 1 and lines and len(lines) != len(current):
+        # By position, an item would shift into a slot of another type and cast silently. An
+        # emptied list has no items to shift, so it is allowed
         raise ListTypesError("a list whose items have more than one type can't change length")
     items: list[Scalar] = []
     kind: str
