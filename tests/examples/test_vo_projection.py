@@ -221,7 +221,7 @@ def test_writes_through_the_adapter(toy: tuple[Dispatcher, Path]) -> None:
     assert run(cat(d, f"{root}/seed/count")) == b"25\n"
     on_disk = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert on_disk["seed"]["count"] == 25
-    assert on_disk["seed"]["members"] == ["three", "4"]  # Items are strings
+    assert on_disk["seed"]["members"] == ["three", "4"]  # Each item's position: strings
     assert on_disk["seed"]["extra"] == {
         "size": 5,
         "inner": {"colour": "red"},
@@ -254,6 +254,23 @@ def test_the_adapter_refuses(
         assert errno_of(d.open(run(walk(d, f"{root}/{leaf}")), os.O_WRONLY)) == errno.EACCES
     seed = run(walk(d, f"{root}/seed"))
     assert errno_of(d.create(seed, "left", 0o644, os.O_WRONLY)) == errno.EPERM
+    assert path.read_bytes() == before
+
+
+def test_the_adapter_and_design_0012(toy: tuple[Dispatcher, Path]) -> None:
+    """A truncating open commits, and a list keeps its items' types (design 0012)."""
+    d, path = toy
+    root = "/orgs/toy-org"
+    run(session(d, f"{root}/seed/extra/tags", b"x\n7\n"))  # Past the end: the last item's type
+    assert yaml.safe_load(path.read_text(encoding="utf-8"))["seed"]["extra"]["tags"] == ["x", "7"]
+    info = run(d.open(run(walk(d, f"{root}/seed/members")), os.O_WRONLY | os.O_TRUNC))
+    run(d.flush(info.fh))  # `: > members`: emptied, as `truncate(2)` would
+    run(d.release(info.fh))
+    assert yaml.safe_load(path.read_text(encoding="utf-8"))["seed"]["members"] == []
+    before = path.read_bytes()
+    info = run(d.open(run(walk(d, f"{root}/seed/count")), os.O_WRONLY | os.O_TRUNC))
+    assert errno_of(d.flush(info.fh)) == errno.EINVAL  # `: > count`: an integer can't be null
+    run(d.release(info.fh))
     assert path.read_bytes() == before
 
 
@@ -481,7 +498,7 @@ def test_write_then_read_a_seed_value(
     assert run(cat(d, f"{ROOT}/seed/{strings[0]}")) == b"A new value\n"
     expected = copy.deepcopy(pilot)
     expected["seed"][strings[0]] = "A new value"
-    if lists:  # Replaced whole, one item per line, items strings
+    if lists:  # Replaced whole, one item per line, each its position's type: names
         run(session(d, f"{ROOT}/seed/{lists[0]}", b"first\n2\n"))
         assert run(cat(d, f"{ROOT}/seed/{lists[0]}")) == b"first\n2\n"
         expected["seed"][lists[0]] = ["first", "2"]

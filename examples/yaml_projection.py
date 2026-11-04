@@ -1,4 +1,4 @@
-"""YAML projection: one YAML document mounted as a tree, with checked writes (design 0011).
+"""YAML projection: one YAML document mounted as a tree, with checked writes (designs 0011, 0012).
 
 An example, not part of the sluice package: copy it beside your app module and adapt it.
 Mappings are directories, scalars are files and a list of scalars is one file, one item per
@@ -23,28 +23,42 @@ type decides, else the current value's type. A leaf the model marks `is_referenc
 path, say) reads as its reference text: nothing resolves it, and nothing here runs `pass` or
 any other subprocess.
 
-Writes (design 0011 "A write, step by step"). A leaf the model marks `writable` is mode 0644,
-every other leaf 0444. Opening one for writing gives a handle with a buffer, empty with
-`O_TRUNC`, else the current content; `write` changes the buffer, and a write at offset 0 (what
-`echo` and `printf` send) casts and validates the buffer as it stands, failing that `write`
-with `EINVAL`, so the shell sees it. `flush` and `fsync` commit, under the store's lock: cast,
-set the leaf in a deep copy, validate the copy, `dump` it to a temporary file beside the
-document, `load` that back and require it equal to the copy, fsync, rename it over the
-document, and swap the copy in. The blocking steps run in a worker thread. Any failure leaves
-the document on disk and in memory as it was, and removes the temporary file. A handle that
-wrote nothing commits nothing; `release` only drops the buffer.
+Writes (design 0011 "A write, step by step", and design 0012's edge cases). A leaf the model
+marks `writable` is mode 0644, every other leaf 0444. Opening one for writing gives a handle
+with a buffer, empty with `O_TRUNC`, else the current content; `write` changes the buffer. A
+write at offset 0 (what `echo` and `printf` send) casts and validates the buffer as it stands,
+failing that `write` with `EINVAL` so the shell sees it, but only when the chunk is shorter than
+`MAX_WRITE_FLOOR` (4096) bytes, so it is the whole of one `write(2)`, and the buffer doesn't end
+partway through a multi-byte character; anything else is checked at `flush`. A refused write
+keeps its bytes in the buffer (POSIX would transfer nothing), so `flush` refuses them again
+rather than committing what was there before. `flush` and `fsync` commit, under the store's
+lock: check the file is unchanged on disk, cast, set the leaf in a deep copy, validate the copy,
+and, unless the value equals the leaf's current one (then nothing is written, so the file keeps
+its comments and mtime), `dump` it to a temporary file beside the document, `load` that back
+and require it equal to the copy, fsync, rename it over the document, and swap the copy in. The
+blocking steps run in a worker thread. Any failure leaves the document on disk and in memory as
+it was, and removes the temporary file. An open with `O_TRUNC` (any access mode) is a change:
+its empty buffer commits at `flush` as `truncate(2)` to 0 does, so `: > leaf` empties a list and
+fails with `EINVAL` on a leaf that can't be null. A handle opened without it that wrote nothing
+commits nothing; `release` only drops the buffer. With two write handles on one leaf, the last
+to `flush` wins.
 
 A write casts strictly: one trailing newline is stripped, an integer is `-?[0-9]+` with no `+`,
 `_` or leading zero, a boolean is `true` or `false`, a date `YYYY-MM-DD`, a datetime what
 `datetime.fromisoformat` reads, a float (a leaf with no declared type holding one) what
 `float()` reads, finite. Zero bytes are null, which only a leaf whose current value is null
-(and no declared type) takes. A list is replaced whole, one string item per line.
+(and no declared type) takes: an empty file is never the empty string. A list is replaced whole,
+one item per line, each cast by the rule above for its type: a declared item type (none in v1),
+else the type of the current item at its position; past the end, the type of the last non-null
+item (strings if none); at a null item, an empty line stays null and other text takes the type
+the non-null items share (else a string). A list whose non-null items have more than one type
+can be edited in place, but not change its length (`list-types`).
 
 What a writer sees, and why (each refusal is logged at warning with its code and JSON Pointer,
 never the value):
 
-- `EINVAL`: the content doesn't cast to the leaf's type, isn't UTF-8, or the model's
-  `validate` has a finding for the changed document;
+- `EINVAL`: the content doesn't cast to the leaf's type, isn't UTF-8, changes the length of a
+  list of mixed types, or the model's `validate` has a finding for the changed document;
 - `EACCES`: the leaf isn't writable, or is a secret reference (checked before `writable` is
   ever consulted, at `open` and at `setattr`);
 - `EBUSY`: the file changed on disk since it was loaded (another writer): it is reloaded and
@@ -64,6 +78,7 @@ instead, committed at their `flush`: the handler can't tell `ftruncate` on a han
 from __future__ import annotations
 
 import asyncio
+import codecs
 import copy
 import datetime as dt
 import errno
@@ -80,6 +95,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Protocol
 
 from sluice import Attr, Context, DirEntry, FsError, Opened, VirtualHandler
+from sluice.mount import MAX_WRITE_FLOOR
 
 log = logging.getLogger(__name__)
 
@@ -269,7 +285,10 @@ class DocumentStore:
         if not self.model.writable(at, doc):
             raise self._refuse(at, "read-only", "the model doesn't allow writing it", errno.EACCES)
         try:
+            # No model declares a list's item type in v1, so `item` is left to position
             value = cast(content, self.model.type_of(at, doc), node)
+        except ListTypesError as e:
+            raise self._refuse(at, "list-types", str(e)) from None
         except ValueError as e:
             raise self._refuse(at, "cast", str(e)) from None
         new = copy.deepcopy(doc)
@@ -308,8 +327,11 @@ class DocumentStore:
             )
 
     def _commit(self, parts: tuple[str, ...], content: bytes) -> tuple[dict[str, Any], _Stamp]:
-        self._unchanged()
+        self._unchanged()  # First: on a change it reloads, so `self.doc` below is current
         new = self.candidate(parts, content)
+        if _same(_leaf(new, parts), _leaf(self.doc, parts)):
+            # Design 0012, question 1: a no-op write leaves the file, its comments and mtime
+            return self.doc, self._loaded
         try:
             text = self.model.dump(new)
         except Exception as e:  # The model's own error type; its message may quote the value
@@ -365,6 +387,21 @@ class DocumentStore:
             raise self._refuse("", "load-back", "dump doesn't load back equal", errno.EIO)
 
 
+def _leaf(doc: dict[str, Any], parts: tuple[str, ...]) -> Any:
+    node: Any = doc
+    for part in parts:
+        node = node[part]
+    return node
+
+
+def _same(a: Any, b: Any) -> bool:
+    """Equal, and of the same types: `1 == True == 1.0`, and two datetimes at one instant with
+    different offsets are equal to Python, but each is a different value here."""
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b, strict=True))
+    return type(a) is type(b) and a == b and repr(a) == repr(b)
+
+
 def render(value: Scalar | list[Scalar], declared: Type | None = None) -> bytes:
     """A leaf's content: each scalar's text and one newline; null is empty."""
     if isinstance(value, list) and declared in {None, "list"}:
@@ -411,12 +448,19 @@ def _kind(value: Scalar | list[Scalar]) -> str:
     return "string"
 
 
-def cast(content: bytes, declared: Type | None, current: Any) -> Scalar | list[Scalar]:
+class ListTypesError(ValueError):
+    """A write would change the length of a list whose items have more than one type."""
+
+
+def cast(
+    content: bytes, declared: Type | None, current: Any, item: Type | None = None
+) -> Scalar | list[Scalar]:
     """A leaf's new value from what was written to it (design 0011 "Scalar serialization").
 
     The declared type decides, else the current value's type: a null leaf takes only null (0
-    bytes), a list only a list. Raises `ValueError` with a message that never quotes the
-    content.
+    bytes), a list only a list. A list's items are typed by `item` if declared, else by
+    position (design 0012, case 2). Raises `ValueError` with a message that never quotes the
+    content, `ListTypesError` for a list that can't change its length.
     """
     kind: str = declared or _kind(current)
     if not declared and current is None:
@@ -428,14 +472,51 @@ def cast(content: bytes, declared: Type | None, current: Any) -> Scalar | list[S
     except UnicodeDecodeError:
         raise ValueError("not valid UTF-8") from None
     if kind == "list":
-        # One item per line, so no item can hold a newline. Items are strings in v1.
-        items: list[Scalar] = [*text.removesuffix("\n").split("\n")] if content else []
-        return items
+        # One item per line, so no item can hold a newline
+        lines = text.removesuffix("\n").split("\n") if content else []
+        return _items(lines, current if isinstance(current, list) else [], item)
     if not content:
         if kind == "null":
             return None
         raise ValueError(f"an empty file is null, which a {kind} leaf can't hold")
-    text = text.removesuffix("\n")  # One newline: `echo` adds it, and a read shows it
+    if kind == "null":
+        raise ValueError("a null leaf takes only an empty file")
+    return _scalar(text.removesuffix("\n"), kind)  # One newline: `echo` adds it, a read shows it
+
+
+def _items(lines: list[str], current: list[Any], item: Type | None) -> list[Scalar]:
+    """A written list's items, typed as the list they replace types them (design 0012, case 2):
+    item *i* by current item *i*, past the end by the last non-null item, a null slot by the
+    type the non-null items share; a declared item type wins over all of these."""
+    kinds = [_kind(v) for v in current if v is not None]
+    shared = kinds[0] if len(set(kinds)) == 1 else None
+    if len(set(kinds)) > 1 and len(lines) != len(current):
+        # By position, an item would shift into a slot of another type and cast silently
+        raise ListTypesError("a list whose items have more than one type can't change length")
+    items: list[Scalar] = []
+    kind: str
+    for i, line in enumerate(lines):
+        if item:
+            kind, null_slot = item, False
+        elif i < len(current):
+            null_slot = current[i] is None
+            kind = (shared or "string") if null_slot else _kind(current[i])
+        else:
+            null_slot, kind = False, kinds[-1] if kinds else "string"
+        if null_slot and not line:
+            items.append(None)
+        elif not line and kind != "string":
+            raise ValueError(f"item {i} is empty, which a {kind} item can't be")
+        else:
+            try:
+                items.append(_scalar(line, kind))
+            except ValueError:
+                raise ValueError(f"item {i} isn't a valid {kind}") from None
+    return items
+
+
+def _scalar(text: str, kind: str) -> Scalar:
+    """`text` (its newline stripped) cast strictly to `kind`. Raises `ValueError`."""
     match kind:
         case "string":
             return text
@@ -455,9 +536,18 @@ def cast(content: bytes, declared: Type | None, current: Any) -> Scalar | list[S
                 number = float(text)
                 if math.isfinite(number):
                     return number
-        case "null":
-            raise ValueError("a null leaf takes only an empty file")
     raise ValueError(f"isn't a valid {kind}")
+
+
+def _ends_mid_character(data: bytes | bytearray) -> bool:
+    """Whether `data` ends in the first bytes of a multi-byte UTF-8 character. Invalid UTF-8
+    elsewhere is not "mid character": the check at write is left to refuse it."""
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        decoder.decode(bytes(data), final=False)
+    except UnicodeDecodeError:
+        return False
+    return bool(decoder.getstate()[0])
 
 
 class _Buffer:
@@ -567,6 +657,9 @@ class Projection(VirtualHandler):
             raise refused
         data = b"" if flags & os.O_TRUNC else self._content(parts, node, doc)
         buffer = _Buffer(parts, data)
+        # Design 0012, case 1: a truncating open is a change, committed at flush like
+        # `truncate(2)` to 0, however the kernel spells it (atomic O_TRUNC, or a size-0 setattr)
+        buffer.dirty = bool(flags & os.O_TRUNC)
         self._writers.setdefault(parts, set()).add(buffer)
         return _Writing(data=data, direct_io=True, buffer=buffer)
 
@@ -583,7 +676,11 @@ class Projection(VirtualHandler):
             buffer.data.extend(b"\0" * (offset - len(buffer.data)))
         buffer.data[offset : offset + len(data)] = data
         buffer.dirty = True
-        if offset == 0:  # `echo` and `printf`: the shell ignores close's error, not write's
+        # `echo` and `printf`: the shell ignores close's error, not write's. Only a short chunk
+        # is a whole `write(2)`, and a split character isn't a value yet (design 0012, case 3).
+        # A refused write keeps its bytes: `flush` refuses them again, rather than committing
+        # the empty buffer a truncating open left.
+        if offset == 0 and len(data) < MAX_WRITE_FLOOR and not _ends_mid_character(buffer.data):
             await self.store.check(buffer.parts, bytes(buffer.data))
         return len(data)
 

@@ -66,6 +66,14 @@ def check_mountpoint(point: str, device: Path = FUSE_DEVICE) -> Path:
     return path
 
 
+# The smallest maximum write a FUSE mount can have. With `direct_io` the kernel splits a
+# `write(2)` only where it exceeds the maximum write or the pages one request may carry, and
+# `fuse_options` sets neither (`max_write`, `max_pages`), so a chunk shorter than this is the
+# whole of one `write(2)`. The YAML projection relies on it (design 0012, case 3); a test fails
+# if either limit is ever set here.
+MAX_WRITE_FLOOR = 4096
+
+
 def fuse_options(cfg: Config, defaults: frozenset[str]) -> set[str]:
     options = set(defaults) | {f"fsname={cfg.mount_fsname}"}
     if cfg.mount_allow_other:

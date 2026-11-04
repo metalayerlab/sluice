@@ -20,3 +20,10 @@ the team (and its AI assistants) should know at a glance.
 - Own settings engine or `Secret` beside interpose: the copies drift; mechanism lives in interpose (design 0003).
 - Pinning interpose via `[tool.uv.sources]` only: a built wheel would look `interpose` up on PyPI (design 0003).
 - `env.expose` name rules in interpose: sluice policy, not mechanism (design 0003).
+- YAML projection: `: > leaf` as a documented no-op: one request would commit or not by the kernel's flags, silently (design 0012).
+- YAML projection: checking an `O_TRUNC` open's empty buffer at `open`: `echo x > leaf` would fail before its value arrived (design 0012).
+- YAML projection: typing written list items as YAML would (`3` an integer): the projector would parse YAML, and YAML 1.1 turns `No`, `on`, `007` into other types (design 0012).
+- YAML projection: one item type for a whole list: a mixed list still loses its types on an unchanged write (design 0012).
+- YAML projection: checking at write only a buffer that ends in a newline: `printf bad > leaf` would pass `write` and fail only at `close` (design 0012).
+- YAML projection: comparing a chunk with the mount's own maximum write: the handler can't see it, and the kernel can split up to a page early (design 0012).
+- YAML projection: a prefix grammar per type, failing only what no later write could fix: a grammar for every type, and `validate` can't run on a prefix (design 0012).
