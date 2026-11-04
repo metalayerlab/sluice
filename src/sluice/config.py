@@ -27,7 +27,6 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
 
 from interpose.settings import (
     ConfigError,
@@ -59,7 +58,13 @@ _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 def _exposable(value: Value) -> None:
     """`env.expose`: environment variable names, and none of sluice's own."""
-    for name in cast(tuple[str, ...], value):
+    # Since interpose v0.4.0 a tuple `Value` may also hold `Section`s, so narrow each item
+    # rather than cast the tuple: a list setting's items are str.
+    if not isinstance(value, tuple):  # pragma: no cover - a list setting is a tuple
+        raise ValueError("expected a list")
+    for name in value:
+        if not isinstance(name, str):  # pragma: no cover - a list setting's items are str
+            raise ValueError("expected a list of names")
         if name.startswith(ENV_PREFIX):
             # sluice's own settings (and their _FILE paths) stay out of templates and middleware.
             raise ValueError(f"{name} is a sluice setting and can't be exposed")

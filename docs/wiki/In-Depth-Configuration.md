@@ -12,6 +12,9 @@ Every setting can be given in four places, and the first one that has it wins:
 `<KEY>` is the setting's key in upper case, with the dots as underscores: `listen.port` is `SLUICE_LISTEN_PORT`.
 
 Values are checked strictly against the setting's type, and a wrong one stops sluice with a one-line error rather than being converted: a whole-number setting takes `500` but not `0.5`, `true` or `1_000` from the environment; a text setting takes a single value, not a YAML list. A `_FILE` value has its trailing whitespace (the newline) removed; leading spaces are kept. sluice gets these rules from [interpose](https://github.com/metalayerlab/interpose), the settings library it shares with other metalayerlab tools.
+
+Two things sluice does not do, though interpose can: an unknown key in the config file, or a `SLUICE_*` variable no setting reads, is ignored without a warning, so check the spelling against the table below; and `${VAR}` in the config file is not expanded, but read as written.
+
 `sluice config` prints the effective value of every setting and where it came from, with secrets masked.
 
 ## Settings
