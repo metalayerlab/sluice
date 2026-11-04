@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.9](https://github.com/metalayerlab/sluice/compare/v0.2.8...v0.2.9) (2026-11-04)
+
+
+### ✨ Features
+
+* **examples:** writes in the YAML projection (design 0011 step 4) ([#84](https://github.com/metalayerlab/sluice/issues/84)) ([068559a](https://github.com/metalayerlab/sluice/commit/068559a05e8a7dbd7c562dc676e01d43d979e4bd))
+
 ## [0.2.8](https://github.com/metalayerlab/sluice/compare/v0.2.7...v0.2.8) (2026-11-04)
 
 
