@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.13](https://github.com/metalayerlab/sluice/compare/v0.2.12...v0.2.13) (2026-11-04)
+
+
+### 🐛 Bug Fixes
+
+* **examples:** the YAML projection's write edge cases (design 0012) ([#96](https://github.com/metalayerlab/sluice/issues/96)) ([e3221b2](https://github.com/metalayerlab/sluice/commit/e3221b28a791b56fd7b34ce6259d4060ce6d7a0f))
+
+
+### 📚 Documentation
+
+* approve the YAML projection's write edge cases (design 0012) ([#94](https://github.com/metalayerlab/sluice/issues/94)) ([7eea209](https://github.com/metalayerlab/sluice/commit/7eea209c089ba1e53fba7753c5ceba3f5c5886fe))
+
 ## [0.2.12](https://github.com/metalayerlab/sluice/compare/v0.2.11...v0.2.12) (2026-11-04)
 
 
