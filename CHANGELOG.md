@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.12](https://github.com/metalayerlab/sluice/compare/v0.2.11...v0.2.12) (2026-11-04)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** bump interpose from v0.4.1 to v0.5.0 ([#92](https://github.com/metalayerlab/sluice/issues/92)) ([469ae6f](https://github.com/metalayerlab/sluice/commit/469ae6ff8338e647695d1847fcc087631dd90883))
+
 ## [0.2.11](https://github.com/metalayerlab/sluice/compare/v0.2.10...v0.2.11) (2026-11-04)
 
 
