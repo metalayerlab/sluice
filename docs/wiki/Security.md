@@ -36,6 +36,8 @@ sluice's own settings hold no secrets. Your app's secrets, if it has any, are fi
 - What a secret grants is up to your app: a database password used by a config template, a key `verify()` checks tokens against.
 - **Rotating:** secrets are read once at mount time. Replace the file, then restart the mount (in Kubernetes, roll the pod). Open files on the old mount break at the restart.
 
+The example YAML projection (`examples/yaml_projection.py`) can show a document that names secrets kept elsewhere. A leaf its model marks `is_reference` shows its reference text (a `pass:` path), never the value: the projector never resolves it, never runs `pass` or any other process, and refuses every write to it with `EACCES` before it asks the model whether the leaf is writable. The projection has no access control of its own: give its route the middleware (`auth()`) the document needs.
+
 ## Hardening
 
 - **Container:** runs as uid 1000, but a FUSE mount needs `/dev/fuse` and, in most runtimes, `CAP_SYS_ADMIN` (or a FUSE device plugin) and an unconfined AppArmor profile. Grant only those: keep the root filesystem read-only and drop every other capability. See [Deployment](Deployment).
