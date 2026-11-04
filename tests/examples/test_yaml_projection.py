@@ -23,12 +23,14 @@ from yaml_projection import (
     Model,
     Projection,
     Type,
+    cast,
     pointer,
 )
 
 from sluice import FsError, Sluice
 from sluice.context import SetattrArgs
 from sluice.dispatch import Dispatcher
+from sluice.mount import MAX_WRITE_FLOOR
 
 from .conftest import cat, errno_of, ls, run, walk
 
@@ -48,6 +50,7 @@ founded: 2001-04-01
 updated: 2026-11-04T09:30:00Z
 tags: [alpha, beta, 3, null, 2.5]
 empty: []
+counts: [1, 2, 3]
 address:
   street: 1 High Street
   city: Exampleton
@@ -153,7 +156,7 @@ def test_ls_shows_mappings_as_directories_and_the_rest_as_files(d: Dispatcher) -
     root = run(ls(d, "/widget"))
     assert list(root) == [
         "name", "motto", "summary", "staff", "active", "ratio", "notes", "founded", "updated",
-        "tags", "empty", "address", "contact",
+        "tags", "empty", "counts", "address", "contact",
     ]  # fmt: skip
     assert stat.S_ISDIR(root["address"].st_mode)
     assert stat.S_ISDIR(root["contact"].st_mode)
@@ -177,6 +180,7 @@ def test_ls_shows_mappings_as_directories_and_the_rest_as_files(d: Dispatcher) -
         ("updated", b"2026-11-04T09:30:00+00:00\n"),  # `Z` is spelling; the offset is the value
         ("tags", b"alpha\nbeta\n3\n\n2.5\n"),  # A null item is an empty line
         ("empty", b""),
+        ("counts", b"1\n2\n3\n"),
         ("address/street", b"1 High Street\n"),
         ("address/geo/lat", b"51.5\n"),
     ],
@@ -372,9 +376,11 @@ def only_the_document(doc: Path) -> None:
             b"2026-11-05T10:00:00+01:00\n",
             dt.datetime(2026, 11, 5, 10, tzinfo=dt.timezone(dt.timedelta(hours=1))),
         ),
-        ("tags", b"x\ny z\n", ["x", "y z"]),  # The whole list is replaced; items are strings
-        ("tags", b"", []),
-        ("empty", b"one\n", ["one"]),  # No declared type: a list stays a list
+        # The whole list is replaced; each item keeps its position's type (design 0012)
+        ("tags", b"x\ny z\n4\n\n0.25\n", ["x", "y z", 4, None, 0.25]),
+        ("counts", b"", []),
+        ("counts", b"1\n2\n3\n4\n", [1, 2, 3, 4]),  # Appended: the last item's type
+        ("empty", b"one\n", ["one"]),  # No declared type: a list stays a list, of strings
         ("address/street", b"2 Low Road\n", "2 Low Road"),
         ("address/geo/lat", b"52.25\n", 52.25),
     ],
@@ -464,8 +470,9 @@ def test_a_handle_that_wrote_nothing_commits_nothing(
     d: Dispatcher, doc: Path, model: ToyModel
 ) -> None:
     before, mtime = doc.read_bytes(), os.stat(doc).st_mtime_ns
-    run(write(d, "/widget/staff", []))  # Opened with O_TRUNC, closed without a write
+    # Opened without O_TRUNC, closed without a write (with O_TRUNC it commits: design 0012)
     run(write(d, "/widget/staff", [], flags=os.O_WRONLY))
+    run(write(d, "/widget/staff", [], flags=os.O_RDWR))
     assert doc.read_bytes() == before
     assert os.stat(doc).st_mtime_ns == mtime
     assert model.dumps == 0
@@ -498,7 +505,6 @@ def test_a_read_handle_cannot_write(d: Dispatcher) -> None:
         ("staff", b"-0\n"),
         ("staff", b"twelve\n"),
         ("staff", b"12\n\n"),  # Only one newline is stripped
-        ("staff", b"1" * 5000 + b"\n"),  # Past Python's digit limit
         ("active", b"yes\n"),
         ("active", b"1\n"),
         ("active", b"True\n"),
@@ -705,8 +711,8 @@ def test_concurrent_commits_are_serialised_by_the_lock(doc: Path, mount: Mount) 
 def test_truncate_on_a_path_commits(d: Dispatcher, doc: Path) -> None:
     run(d.setattr(run(walk(d, "/widget/staff")), SetattrArgs(size=1)))  # "12\n" to "1"
     assert on_disk(doc)["staff"] == 1
-    run(d.setattr(run(walk(d, "/widget/tags")), SetattrArgs(size=0)))
-    assert on_disk(doc)["tags"] == []
+    run(d.setattr(run(walk(d, "/widget/counts")), SetattrArgs(size=0)))
+    assert on_disk(doc)["counts"] == []
     entry = run(d.setattr(run(walk(d, "/widget/motto")), SetattrArgs(size=7)))  # Pads with \0
     assert on_disk(doc)["motto"] == "true\n\0\0"
     assert entry.attr.st_size == len(b"true\n\0\0\n")
@@ -880,3 +886,220 @@ def test_the_written_file_keeps_its_owner_where_it_can(
     echo(d, "/widget/staff", b"4\n")
     assert calls == [(st.st_uid, st.st_gid)]
     assert on_disk(doc)["staff"] == 4
+
+
+# Design 0012: the write edge cases
+
+
+def lists(tmp_path: Path, mount: Mount, text: str) -> tuple[Dispatcher, Path]:
+    """The projection of a small document of its own, beside the toy one."""
+    path = tmp_path / "lists.yaml"
+    path.write_text("name: Lists\n" + text, encoding="utf-8")
+    app = Sluice()
+    app.route("/widget/{rest*}", virtual=True, handler=Projection(DocumentStore(path, ToyModel())))
+    return mount(app), path
+
+
+def test_a_truncating_open_with_no_write_commits(
+    d: Dispatcher, doc: Path, model: ToyModel, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`: > leaf`: one open with O_TRUNC, no write, flush (case 1)."""
+    run(write(d, "/widget/counts", []))
+    assert on_disk(doc)["counts"] == []  # A list is emptied
+    assert run(cat(d, "/widget/counts")) == b""
+    before = doc.read_bytes()
+    with caplog.at_level(logging.WARNING):
+        for leaf in ("staff", "motto", "active", "founded", "updated", "ratio"):
+            # Any access mode: Linux truncates on O_RDONLY | O_TRUNC too
+            for flags in (WRITE, os.O_RDWR | os.O_TRUNC, os.O_RDONLY | os.O_TRUNC):
+                assert errno_of(write(d, f"/widget/{leaf}", [], flags=flags)) == errno.EINVAL
+    assert doc.read_bytes() == before  # Byte-identical
+    assert "write refused: cast at /staff: an empty file is null" in caplog.text
+    only_the_document(doc)
+    dumps = model.dumps
+    run(write(d, "/widget/notes", []))  # Null takes null: the value it has, so no rewrite
+    assert doc.read_bytes() == before
+    assert model.dumps == dumps
+
+
+def test_a_refused_write_keeps_its_bytes_so_flush_never_commits_empty(
+    d: Dispatcher, doc: Path
+) -> None:
+    """`echo bad > counts`: the O_TRUNC open left an empty buffer, which must not commit."""
+    before = doc.read_bytes()
+    info = run(d.open(run(walk(d, "/widget/counts")), WRITE))
+    assert errno_of(d.write(info.fh, 0, b"many\n")) == errno.EINVAL
+    assert errno_of(d.flush(info.fh)) == errno.EINVAL
+    run(d.release(info.fh))
+    assert doc.read_bytes() == before
+    assert on_disk(doc)["counts"] == [1, 2, 3]
+
+
+def test_a_mixed_list_written_back_unchanged_keeps_its_types(
+    d: Dispatcher, doc: Path, store: DocumentStore
+) -> None:
+    """`cat tags > t; cat t > tags` (case 2)."""
+    content = run(cat(d, "/widget/tags"))
+    echo(d, "/widget/tags", content)
+    tags = on_disk(doc)["tags"]
+    assert tags == ["alpha", "beta", 3, None, 2.5]
+    assert [type(t) for t in tags] == [str, str, int, type(None), float]
+    assert store.doc["tags"] == tags
+    echo(d, "/widget/tags", b"alpha\nbeta\n4\nnew\n2.5\n")  # Edited in place
+    tags = on_disk(doc)["tags"]
+    assert tags == ["alpha", "beta", 4, "new", 2.5]  # A null slot in a mixed list: a string
+    assert [type(t) for t in tags] == [str, str, int, str, float]
+
+
+@pytest.mark.parametrize(
+    ("current", "written", "value"),
+    [
+        ("[1, 2]", b"1\n2\n3\n", [1, 2, 3]),  # Past the end: the last non-null item's type
+        ("[1, null]", b"1\n\n", [1, None]),  # A null slot: an empty line stays null
+        ("[1, null]", b"1\n5\n", [1, 5]),  # Other text: the type the items share
+        ("[1, null]", b"1\n\n7\n", [1, None, 7]),  # Past the end of a null: the last non-null
+        ("[null, null]", b"\n\nx\n", [None, None, "x"]),  # Only nulls: strings
+        ("[a, b]", b"a\n\n", ["a", ""]),  # An empty line in a string slot: the empty string
+        ("[a, 3]", b"b\n4\n", ["b", 4]),  # Mixed, same length: by position
+        ("[true]", b"false\ntrue\n", [False, True]),
+        ("[2026-11-04]", b"2026-11-05\n", [dt.date(2026, 11, 5)]),
+        ("[0.5]", b"0.5\n1.25\n", [0.5, 1.25]),
+        ("[]", b"3\n", ["3"]),  # An empty list: strings, as in design 0011
+    ],
+)
+def test_written_items_take_their_positions_types(
+    tmp_path: Path, mount: Mount, current: str, written: bytes, value: list[Any]
+) -> None:
+    d, path = lists(tmp_path, mount, f"items: {current}\n")
+    echo(d, "/widget/items", written)
+    items = on_disk(path)["items"]
+    assert items == value
+    assert [type(i) for i in items] == [type(v) for v in value]
+
+
+@pytest.mark.parametrize(
+    ("current", "written"),
+    [
+        ("[1, 2]", b"1\nthree\n"),  # Doesn't cast to its position's type
+        ("[1, 2]", b"1\n2\nthree\n"),  # Nor past the end
+        ("[1, 2]", b"1\n\n"),  # An empty line in an integer slot
+        ("[1, 2]", b"1\n2\n\n"),
+        ("[1, null]", b"1\nx\n"),  # A null slot takes the shared type
+        ("[true]", b"yes\n"),
+    ],
+)
+def test_an_item_that_does_not_cast_is_einval(
+    tmp_path: Path, mount: Mount, current: str, written: bytes
+) -> None:
+    d, path = lists(tmp_path, mount, f"items: {current}\n")
+    before = path.read_bytes()
+    info = run(d.open(run(walk(d, "/widget/items")), WRITE))
+    assert errno_of(d.write(info.fh, 0, written)) == errno.EINVAL
+    run(d.release(info.fh))
+    assert path.read_bytes() == before
+
+
+def test_a_mixed_list_cannot_change_its_length(
+    d: Dispatcher, doc: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    before = doc.read_bytes()
+    with caplog.at_level(logging.WARNING):
+        for written in (b"alpha\nbeta\n3\n\n", b"alpha\nbeta\n3\n\n2.5\nsecret-item\n", b""):
+            info = run(d.open(run(walk(d, "/widget/tags")), WRITE))
+            assert errno_of(d.write(info.fh, 0, written)) == errno.EINVAL
+            run(d.release(info.fh))
+        assert errno_of(write(d, "/widget/tags", [])) == errno.EINVAL  # `: > tags`
+        tags = run(walk(d, "/widget/tags"))
+        assert errno_of(d.setattr(tags, SetattrArgs(size=0))) == errno.EINVAL
+    assert doc.read_bytes() == before
+    assert "write refused: list-types at /tags" in caplog.text
+    assert "secret-item" not in caplog.text
+
+
+def test_a_declared_item_type_wins_over_position() -> None:
+    assert cast(b"3\n4\n", "list", ["a", "b"], item="integer") == [3, 4]
+    assert cast(b"3\n", "list", [1], item="string") == ["3"]
+    assert cast(b"3\n\n", "list", ["a", "b", "c"], item="string") == ["3", ""]  # Any length
+    assert cast(b"a\nb\nc\n", "list", ["a", 3], item="string") == ["a", "b", "c"]  # Mixed
+
+
+def test_a_large_value_is_checked_at_close_only(tmp_path: Path, mount: Mount) -> None:
+    """A chunk of `MAX_WRITE_FLOOR` bytes or more may be one piece of a split write (case 3)."""
+    d, path = lists(tmp_path, mount, "days: [2026-11-04]\n")
+    value = b"2026-11-04\n" * 400  # 4400 bytes: the first chunk ends partway through a date
+    chunks = [(0, value[:MAX_WRITE_FLOOR]), (MAX_WRITE_FLOOR, value[MAX_WRITE_FLOOR:])]
+    run(write(d, "/widget/days", chunks))
+    assert on_disk(path)["days"] == [dt.date(2026, 11, 4)] * 400
+    before = path.read_bytes()
+    bad = [(0, b"x" * MAX_WRITE_FLOOR)]  # Not a date, but too long to check at write
+    assert errno_of(write(d, "/widget/days", bad)) == errno.EINVAL  # Refused at flush
+    assert path.read_bytes() == before
+
+
+def test_a_value_past_the_digit_limit_is_refused_at_close(d: Dispatcher, doc: Path) -> None:
+    before = doc.read_bytes()
+    info = run(d.open(run(walk(d, "/widget/staff")), WRITE))
+    assert run(d.write(info.fh, 0, b"1" * 5000 + b"\n")) == 5001  # Long: not checked yet
+    assert errno_of(d.flush(info.fh)) == errno.EINVAL
+    run(d.release(info.fh))
+    assert doc.read_bytes() == before
+
+
+def test_a_character_split_across_chunks_commits(d: Dispatcher, doc: Path) -> None:
+    """A program writing in fixed-size blocks can split a character between two (case 3)."""
+    run(write(d, "/widget/motto", [(0, b"Caf\xc3"), (4, b"\xa9\n")]))
+    assert on_disk(doc)["motto"] == "Café"
+    run(write(d, "/widget/motto", [(0, b"\xe2\x82"), (2, b"\xac\n")]))  # Two of three bytes
+    assert on_disk(doc)["motto"] == "€"
+    before = doc.read_bytes()
+    assert errno_of(write(d, "/widget/motto", [(0, b"\xc3")])) == errno.EINVAL  # Still split
+    assert errno_of(write(d, "/widget/motto", [(0, b"\xff\xc3")])) == errno.EINVAL  # Invalid
+    assert doc.read_bytes() == before
+
+
+def test_one_short_bad_write_still_fails_at_write(d: Dispatcher, doc: Path) -> None:
+    before = doc.read_bytes()
+    info = run(d.open(run(walk(d, "/widget/staff")), WRITE))
+    assert errno_of(d.write(info.fh, 0, b"x" * (MAX_WRITE_FLOOR - 1))) == errno.EINVAL
+    run(d.release(info.fh))
+    info = run(d.open(run(walk(d, "/widget/motto")), WRITE))
+    assert errno_of(d.write(info.fh, 0, b"\xff\n")) == errno.EINVAL  # Invalid, not split
+    run(d.release(info.fh))
+    assert doc.read_bytes() == before
+
+
+def test_a_write_of_the_current_value_leaves_the_file_alone(
+    d: Dispatcher, doc: Path, model: ToyModel
+) -> None:
+    """Design 0012, question 1: no dump, no rename, so comments and mtime survive."""
+    doc.write_text("# A comment the dump would drop\n" + TOY, encoding="utf-8")
+    st = os.stat(doc)
+    os.utime(doc, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))  # Coarse clocks
+    run(ls(d, "/widget"))  # Reloaded
+    before, mtime = doc.read_bytes(), os.stat(doc).st_mtime_ns
+    for leaf in ("staff", "motto", "tags", "updated", "notes", "address/geo/lat", "empty"):
+        echo(d, f"/widget/{leaf}", run(cat(d, f"/widget/{leaf}")))
+    run(d.setattr(run(walk(d, "/widget/staff")), SetattrArgs(size=3)))  # The size it has
+    assert doc.read_bytes() == before
+    assert os.stat(doc).st_mtime_ns == mtime
+    assert model.dumps == 0
+    # Equal to Python, but not the same value: each is written
+    echo(d, "/widget/updated", b"2026-11-04T10:30:00+01:00\n")  # The same instant
+    assert on_disk(doc)["updated"].utcoffset() == dt.timedelta(hours=1)
+    assert model.dumps == 1
+
+
+def test_the_skip_compares_with_the_document_as_reloaded(
+    d: Dispatcher, doc: Path, store: DocumentStore
+) -> None:
+    """The on-disk check runs first; then the value is compared with the reloaded one."""
+    info = run(d.open(run(walk(d, "/widget/motto")), WRITE))
+    run(d.write(info.fh, 0, b"true\n"))  # The value it has now
+    doc.write_text(TOY.replace("motto: 'true'", "motto: 'okay'"), encoding="utf-8")  # Same size
+    st = os.stat(doc)
+    os.utime(doc, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))  # Coarse clocks
+    assert errno_of(d.flush(info.fh)) == errno.EBUSY  # Not skipped: the file changed
+    assert store.doc["motto"] == "okay"  # Reloaded
+    run(d.flush(info.fh))  # Not the reloaded value, so written
+    run(d.release(info.fh))
+    assert on_disk(doc)["motto"] == "true"

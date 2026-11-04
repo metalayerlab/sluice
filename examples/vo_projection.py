@@ -24,16 +24,17 @@ replacement of another version is refused at reload. A seed value is typed by th
 copy's `seed` declaration for its key; everything else (the template copy, results, the
 leaves inside a `mapping` value) by its current value.
 
-Writes go to seed values only (design 0011, "Writes, in two phases"): `seed/<key>` for a key
-the record's `seed` holds, cast by the type the template copy declares for it, and the leaves
-inside a `mapping`-typed value, each keeping its current type. A `list` value is replaced
-whole, its items strings. Every write is checked by `validate_org` on the whole changed record.
-Everything else is read-only (`EACCES` at `open`): `kind`, `version`, `org`, `name` and
-`status`; `results`, which are the engine's; and the template copy, a verbatim copy of its
-source template, dependencies (`depends_on`) included. A seed key left to its default is absent,
-and adding it changes the record's shape (`EPERM`). Seed writes are allowed whatever `status`
-and `results` say, until the engine's own record rules on when a seed value may change after a
-run. Version 1 has no reference leaves.
+Writes go to seed values only (design 0011, "Writes, in two phases"): `seed/<key>` for a key the
+record's `seed` holds, cast by the type the template copy declares for it, and the leaves inside
+a `mapping`-typed value, each keeping its current type. A `list` value is replaced whole, each
+item keeping the type of the item it replaces (design 0012); `: > seed/<key>` commits an empty
+file, which empties a list and is refused on any other declared type. Every write is checked by
+`validate_org` on the whole changed record. Everything else is read-only (`EACCES` at `open`):
+`kind`, `version`, `org`, `name` and `status`; `results`, which are the engine's; and the
+template copy, a verbatim copy of its source template, dependencies (`depends_on`) included. A
+seed key left to its default is absent, and adding it changes the record's shape (`EPERM`). Seed
+writes are allowed whatever `status` and `results` say, until the engine's own record rules on
+when a seed value may change after a run. Version 1 has no reference leaves.
 """
 
 from __future__ import annotations

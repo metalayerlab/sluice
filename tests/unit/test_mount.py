@@ -5,7 +5,7 @@ import pytest
 
 from sluice.config import load_config
 from sluice.errors import MountError
-from sluice.mount import check_mountpoint, fuse_options, prepare
+from sluice.mount import MAX_WRITE_FLOOR, check_mountpoint, fuse_options, prepare
 
 
 def test_check_mountpoint(tmp_path: Path) -> None:
@@ -44,6 +44,15 @@ def test_fuse_options(tmp_path: Path) -> None:
     assert opts == {"default_permissions", "fsname=sluice", "allow_other", "debug"}
     plain = fuse_options(load_config(tmp_path / "n.yaml", environ={}), frozenset())
     assert plain == {"fsname=sluice"}
+
+
+def test_fuse_options_leave_the_write_limits_at_their_defaults(tmp_path: Path) -> None:
+    """The YAML projection's check at write assumes the default limits (design 0012, case 3):
+    a chunk under `MAX_WRITE_FLOOR` is a whole `write(2)` only if neither is set."""
+    assert MAX_WRITE_FLOOR == 4096
+    for env in ({}, {"SLUICE_MOUNT_ALLOW_OTHER": "1", "SLUICE_MOUNT_DEBUG": "1"}):
+        opts = fuse_options(load_config(tmp_path / "n.yaml", environ=env), frozenset())
+        assert not [o for o in opts if o.split("=")[0] in {"max_write", "max_pages"}]
 
 
 def test_prepare_loads_app_and_logs_secret_names(
