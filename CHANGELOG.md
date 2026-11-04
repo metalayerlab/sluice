@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.15](https://github.com/metalayerlab/sluice/compare/v0.2.14...v0.2.15) (2026-11-04)
+
+
+### 📚 Documentation
+
+* mark design 0012 Implemented ([#99](https://github.com/metalayerlab/sluice/issues/99)) ([0ad64a0](https://github.com/metalayerlab/sluice/commit/0ad64a02d14e2e65f489c432a688e01f4c14e0e0))
+
 ## [0.2.14](https://github.com/metalayerlab/sluice/compare/v0.2.13...v0.2.14) (2026-11-04)
 
 
