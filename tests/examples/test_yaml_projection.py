@@ -868,3 +868,15 @@ def test_a_directory_it_cannot_write_in_fails_the_commit(
         echo(d, "/widget/staff", b"3\n")
     assert e.value.errno == errno.EACCES
     assert doc.read_bytes() == before
+
+
+def test_the_written_file_keeps_its_owner_where_it_can(
+    d: Dispatcher, doc: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[int, int]] = []
+    st = os.stat(doc)
+    monkeypatch.setattr(os, "geteuid", lambda: st.st_uid + 1)  # As if the mount ran as another
+    monkeypatch.setattr(os, "fchown", lambda fd, uid, gid: calls.append((uid, gid)))
+    echo(d, "/widget/staff", b"4\n")
+    assert calls == [(st.st_uid, st.st_gid)]
+    assert on_disk(doc)["staff"] == 4

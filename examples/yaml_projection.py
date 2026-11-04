@@ -324,7 +324,11 @@ class DocumentStore:
         tmp, renamed = Path(name), False
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                os.fchmod(f.fileno(), stat.S_IMODE(os.stat(self.path).st_mode))
+                st = os.stat(self.path)
+                os.fchmod(f.fileno(), stat.S_IMODE(st.st_mode))
+                if (st.st_uid, st.st_gid) != (os.geteuid(), os.getegid()):
+                    with suppress(PermissionError):  # Keep the owner where the mount may
+                        os.fchown(f.fileno(), st.st_uid, st.st_gid)
                 f.write(text)
                 f.flush()
                 self._loads_back(tmp, new)
