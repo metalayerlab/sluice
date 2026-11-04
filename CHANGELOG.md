@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.11](https://github.com/metalayerlab/sluice/compare/v0.2.10...v0.2.11) (2026-11-04)
+
+
+### 🐛 Bug Fixes
+
+* **tests:** wait for the recovery log, not the count, in the abandoned-cap test ([#91](https://github.com/metalayerlab/sluice/issues/91)) ([aa8117d](https://github.com/metalayerlab/sluice/commit/aa8117daf24a5bbd14fd6c836e65b0679adba9f5))
+
+
+### 📚 Documentation
+
+* mark design 0011 Implemented ([#89](https://github.com/metalayerlab/sluice/issues/89)) ([265dec4](https://github.com/metalayerlab/sluice/commit/265dec4341e45a3868fe81418aa227ec354a6234))
+
 ## [0.2.10](https://github.com/metalayerlab/sluice/compare/v0.2.9...v0.2.10) (2026-11-04)
 
 
