@@ -6,6 +6,7 @@ Status: Approved
 Date: 2026-11-04
 Authors: Stephen Cox; drafted by Claude
 Approved: 2026-11-04 by the arbiter (question "Approve Sluice Record 0012 On YAML Write Edge Cases").
+Clarified: 2026-11-04 by the arbiter (question "Mark Sluice Record 0012 Implemented"): emptying a mixed list is allowed; the list-types refusal covers every other length change.
 Supersedes: part of [0011](0011-yaml-projection-pilot.md) (its write rules: a truncating `open` with no `write`, the type of a written list's items, and the check at a write at offset 0)
 
 This record supersedes those three points only; everything else in 0011 stands. 0011 is Implemented, so
@@ -109,7 +110,7 @@ The list being replaced types the items written to it, the way 0011 types a leaf
 - **Mixed lists keep their length.** A write that changes the length of a list whose non-null items have
   more than one type is refused with `EINVAL`, logged like 0011's other refusals (at warning, with the
   code `list-types` and the JSON Pointer, never the value); such a list can still be edited in place
-  (question 2).
+  (question 2), or emptied, since an empty list has no items to shift.
 
 So every unchanged list reads and writes back equal, mixed or not (except an item holding a newline,
 which 0011 already can't write), and the common edits to a list of one type (change, insert, delete,

@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, ClassVar, NoReturn
 
@@ -1004,16 +1004,61 @@ def test_a_mixed_list_cannot_change_its_length(
 ) -> None:
     before = doc.read_bytes()
     with caplog.at_level(logging.WARNING):
-        for written in (b"alpha\nbeta\n3\n\n", b"alpha\nbeta\n3\n\n2.5\nsecret-item\n", b""):
+        for written in (
+            b"alpha\nbeta\n3\n\n",  # One item removed
+            b"alpha\nbeta\n3\n\n2.5\nsecret-item\n",  # One item added
+            b"\n",  # One empty line is one item, not an emptied list
+        ):
             info = run(d.open(run(walk(d, "/widget/tags")), WRITE))
             assert errno_of(d.write(info.fh, 0, written)) == errno.EINVAL
             run(d.release(info.fh))
-        assert errno_of(write(d, "/widget/tags", [])) == errno.EINVAL  # `: > tags`
         tags = run(walk(d, "/widget/tags"))
-        assert errno_of(d.setattr(tags, SetattrArgs(size=0))) == errno.EINVAL
+        assert errno_of(d.setattr(tags, SetattrArgs(size=6))) == errno.EINVAL  # "alpha\n"
     assert doc.read_bytes() == before
     assert "write refused: list-types at /tags" in caplog.text
     assert "secret-item" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "empty",
+    [
+        lambda d: write(d, "/widget/tags", []),  # `: > tags`: O_TRUNC, no write
+        lambda d: write(d, "/widget/tags", [(0, b"")]),  # A write of 0 bytes
+        lambda d: d.setattr(run(walk(d, "/widget/tags")), SetattrArgs(size=0)),  # truncate(2)
+    ],
+    ids=["o_trunc", "empty-write", "truncate"],
+)
+def test_a_mixed_list_can_be_emptied(
+    d: Dispatcher, doc: Path, store: DocumentStore, empty: Callable[[Dispatcher], Awaitable[Any]]
+) -> None:
+    """An emptied list has no items to shift into a slot of another type (design 0012,
+    clarified by the arbiter), so the `list-types` refusal doesn't apply."""
+    run(empty(d))
+    assert "tags: []\n" in doc.read_text(encoding="utf-8")
+    assert on_disk(doc)["tags"] == []
+    assert store.doc["tags"] == []
+    assert run(cat(d, "/widget/tags")) == b""
+
+
+def test_emptying_a_mixed_list_still_asks_validate(
+    doc: Path, mount: Mount, caplog: pytest.LogCaptureFixture
+) -> None:
+    class NeedsTags(ToyModel):
+        def validate(self, doc: dict[str, Any]) -> list[Finding]:
+            found = super().validate(doc)
+            if not doc.get("tags"):
+                found.append(("required", "/tags", "tags must not be empty"))
+            return found
+
+    app = Sluice()
+    app.route("/widget/{rest*}", virtual=True, handler=Projection(DocumentStore(doc, NeedsTags())))
+    d = mount(app)
+    before = doc.read_bytes()
+    with caplog.at_level(logging.WARNING):
+        assert errno_of(write(d, "/widget/tags", [])) == errno.EINVAL
+    assert doc.read_bytes() == before
+    assert "write refused: required at /tags" in caplog.text
+    assert "list-types" not in caplog.text
 
 
 def test_a_declared_item_type_wins_over_position() -> None:
