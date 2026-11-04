@@ -2,9 +2,10 @@
 
 <!-- Add a line for this record to the index in docs/design/README.md (CI checks). -->
 
-Status: Proposed
+Status: Approved
 Date: 2026-11-03
 Authors: Stephen Cox; drafted by Claude
+Approved: 2026-11-04 by the brain coordinator for Stephen.
 
 ## Context
 
@@ -54,7 +55,9 @@ That model fixes what this record builds on:
     Schema gets only `schema` findings.
   - Also `order(template)`, `json_schema(kind, version=1)` and `VALUE_TYPES`.
 - **Version 1 only.** A version 2 of the VO schema is coming, loaded beside version 1 by each
-  document's `version`; the pilot pins version 1 and refuses to mount any other.
+  document's `version`; the pilot pins version 1 and refuses to mount any other. Version 2 adds
+  references to real identifiers (bank, tax, registration) held in `pass`, written as a `pass:` path;
+  see [Secret references](#secret-references).
 - **Public and private.** sluice is public and the model is private. The projector is a sluice example
   that imports the model only when it is installed; whether the model goes public is decided before
   anything in sluice's package needs it (VO 0001, decision 6).
@@ -74,7 +77,7 @@ Checked against sluice `main` (v0.2.5, on interpose v0.2.2) and interpose `main`
 | (not in the spec) | `pipeline.timeout_ms` is interpose's per-*hook* timeout (sluice 0006); it doesn't limit the handler, and the handler runs on the one event loop | Blocking work (validation, dump, fsync) runs in a worker thread, so a write doesn't stall the mount |
 | Sequences are directories, entries named by a keyed field | No keyed sequences exist in the v1 model | A sequence of scalars is one file, an item per line |
 | Strict type coercion, as in interpose's settings | interpose coerces configuration text and accepts `1`/`yes`/`on` for true | Not reused: the projector's rule is stricter (below) |
-| A write "breaking a declared dependency" is rejected at the write syscall | Dependencies (`depends_on`, inputs) live in the template copy, which stays read-only | Refused earlier, at `open` (`EACCES`); a type error in a seed value is rejected at `write` |
+| A write "breaking a declared dependency" is rejected at the write syscall | Dependencies (`depends_on`, inputs) live in the template copy, which stays read-only | Refused earlier, at `open` (`EACCES`); a type error in a seed value is rejected at `write` (accepted by the brain coordinator, 2026-11-04) |
 | "Round-trips through the template loader" | — | Through `load_org`; equal, not byte-identical |
 | Write path in the pilot | — | Kept in the pilot, as a later PR than the read path (build order) |
 
@@ -87,7 +90,8 @@ Checked against sluice `main` (v0.2.5, on interpose v0.2.2) and interpose `main`
   - `examples/yaml_projection.py`: the generic projector. A `DocumentStore` (one per document: parse,
     hold, lock, write back) and a `Projection(VirtualHandler)` for a `{rest*}` route. It takes a small
     `Model` protocol: `load(path) -> dict`, `dump(doc) -> str`, `validate(doc) -> list[(code,
-    pointer, message)]`, `type_of(pointer, doc) -> Type | None` and `writable(pointer, doc) -> bool`.
+    pointer, message)]`, `type_of(pointer, doc) -> Type | None`, `writable(pointer, doc) -> bool`
+    and `is_reference(pointer, doc) -> bool` (see [Secret references](#secret-references)).
     It imports only sluice and the stdlib, and is tested in sluice's CI with a sluice-owned toy
     document and a toy pyyaml model.
   - `examples/vo_projection.py`: the Virtual Organisations adapter. It imports
@@ -139,7 +143,8 @@ comments on its first write.)
 The document must validate when it is mounted: one with findings is refused at mount, so every later
 write starts from a valid document. Until the engine exists, the pilot's document is an org record put
 together from VO's `smallest-charity` template and seed: the template as the copy, the seed's `values`
-as `seed`, empty `results`, `status: creating` (where it is built: [Open questions](#open-questions), 1).
+as `seed`, empty `results`, `status: creating`, built at test time from a VO checkout
+([Open questions](#open-questions), 1).
 
 ### Scalar serialization
 
@@ -190,7 +195,8 @@ writes `x`, and read-then-write is lossless (a string that ends in a newline rea
    [Context](#context)). A write to a read-only leaf fails with `EACCES` at `open`. Creating, removing
    or renaming anything (a new key, a new node) fails with `EPERM`: the pilot changes values, not the
    document's shape. Until the engine's record rules on when a seed value may change after a run,
-   the pilot allows seed writes whatever `status` and `results` say.
+   the pilot allows seed writes whatever `status` and `results` say. A reference leaf is never
+   writable, whatever the writable set says ([Secret references](#secret-references)).
 
 **A write, step by step.** `open` gives a handle with a buffer: empty with `O_TRUNC`, else the current
 content. `write` changes the buffer. When a write starts at offset 0 (what `echo`, `printf` and most
@@ -200,7 +206,7 @@ fails that `write` with `EINVAL`, so the shell sees the error even though it ign
 
 1. cast the buffer (failure: `EINVAL`),
 2. set the leaf in a deep copy of the document,
-3. validate the copy (`validate_org`; any finding: `EINVAL`, and each finding logged with its code and
+3. validate the copy (`validate_org`; any finding: `EINVAL`, and each finding logged at warning with its code and
    JSON Pointer),
 4. `dump` it to a temporary file beside the document, `load_org` that back and require it equal to the
    copy (otherwise `EIO`),
@@ -209,6 +215,24 @@ fails that `write` with `EINVAL`, so the shell sees the error even though it ign
 A failure anywhere leaves the document on disk and in memory unchanged. `truncate(2)` on a path (no
 handle) commits the shortened content the same way. A handle that wrote nothing commits nothing.
 `release` only drops the buffer. Steps 1 and 3–5 run in a worker thread.
+
+### Secret references
+
+The condition of this record's approval. VO's schema version 2 (pending) adds references for real
+identifiers (bank, tax, registration): a field holds a `pass:` path naming where the value is kept, not
+the value. The projector:
+
+- **Shows a reference as written.** The leaf's content is the reference text, the `pass:` path, by the
+  scalar rule; it is never resolved to the value it names.
+- **Never resolves one.** It never calls `pass`, nor runs any subprocess, for any leaf.
+- **Never writes one.** A reference leaf is always read-only: `open` for writing fails with `EACCES`,
+  whatever `writable` says, and `setattr` on it fails the same way.
+
+Generically, the `Model` protocol's `is_reference(pointer, doc) -> bool` marks such a leaf, and the
+projector applies these rules to every leaf it marks, before it consults `writable`. A model with no
+references returns `False` everywhere. Version 1 has no such fields and the pilot refuses version 2,
+so today this binds the generic projector (built and tested now) and the VO adapter's version 2
+support, which needs a record of its own.
 
 ### Lock
 
@@ -266,11 +290,13 @@ the document means.
   template the record was made from; a different graph means a new template and a new record. A seed
   key left to its default isn't in the record, and adding it is a shape change (`EPERM`).
 - The spec's "a write breaking a declared dependency is rejected at the write syscall" is met at
-  `open` instead: dependencies are in the read-only copy.
+  `open` instead: dependencies are in the read-only copy (accepted by the brain coordinator,
+  2026-11-04).
 - The adapter's tests need the model installed, so they don't run in sluice's CI (below).
 - Rollback: delete the example files; nothing in `src/` changes.
 - Wiki: Writing-an-App (the projector), Troubleshooting (editors, `EINVAL` on a write), Security (a
-  writable leaf, and that the access layer is a pass-through), Testing-Guide (the adapter's tests).
+  writable leaf, that the access layer is a pass-through, and that a secret reference shows its `pass:`
+  path, is never resolved, and can't be written), Testing-Guide (the adapter's tests).
 
 ## Build order
 
@@ -279,12 +305,15 @@ One PR each. `virtual_organisations.model` is merged in that repo, so nothing wa
 1. **This record.**
 2. **Generic projector, read-only.** `examples/yaml_projection.py`: store, serialization, lists,
    `getattr`/`readdir`/`open`/`read`, refusing a document with lists of mappings; a toy document and
-   model in `tests/examples/`. The `cat` and `ls` criteria on the toy document.
+   model in `tests/examples/`. The `cat` and `ls` criteria on the toy document. Required: a toy
+   reference leaf reads as its reference text and is never resolved.
 3. **VO adapter, read-only.** `examples/vo_projection.py`, the mypy override, the mount example; the
-   adapter's tests on the pilot's org record (question 1). The `cat` and `ls` criteria on the pilot.
+   adapter's tests on the pilot's org record, built at test time from a VO checkout named by an
+   environment variable and marked `integration` (question 1). The `cat` and `ls` criteria on the pilot.
 4. **Generic projector, writes.** Buffers, the cast, check-at-write and commit-at-flush, the lock,
    atomic write-back with the load-back check, `truncate`, the errnos above; toy-model tests for every
-   step, a failed write leaving the file byte-identical, and a read → write round-trip for every type.
+   step, a failed write leaving the file byte-identical, and a read → write round-trip for every type. Required: a write to a reference leaf
+   refused at `open` with `EACCES`, the file unchanged, and no subprocess spawned.
 5. **VO adapter, writes.** The writable set (seed values), types from the declarations,
    `validate_org`; the remaining acceptance criteria (write-then-read, a seed type error rejected at
    `write` with `EINVAL`, a write to a dependency refused at `open` with `EACCES`, the file unchanged
@@ -293,23 +322,23 @@ One PR each. `virtual_organisations.model` is merged in that repo, so nothing wa
 
 ## Open questions
 
-Answered by the coordinator for Virtual Organisations on 2026-11-04 and folded into the Decision: key
-order in `dump` (kept, `sort_keys=False`), and writes to the template copy (none: seed values only).
-Settled with VO 0001 (decision 6): the projector is a sluice example that imports the model only when
-it is installed.
+Answered by the brain coordinator for Stephen on 2026-11-04, each with the recommendation adopted.
+Earlier, the coordinator for Virtual Organisations answered key order in `dump` (kept,
+`sort_keys=False`) and writes to the template copy (none: seed values only), both folded into the
+Decision; and VO 0001 (decision 6) settled that the projector is a sluice example that imports the
+model only when it is installed.
 
 1. **Where the pilot's org record and the adapter's tests live.** sluice is public, the model private.
    Options: (a) a hand-made org record in sluice's tests, (b) the record built at test time from a VO
    checkout named by an environment variable, with the tests marked `integration`, (c) the record in the
-   VO repo's examples. *Recommendation: (b) now, (c) once the engine produces one*: nothing from the
-   private repo lands in a public one before Stephen decides to make it public, and "never skip a test"
-   holds, as integration tests are opt-in by design.
-2. **The document changes on disk while mounted** (the engine, or Stephen's editor). *Recommendation:
-   at each commit, under the lock, compare the file's inode, size and mtime with those at load; if they
+   VO repo's examples. **Answer:** (b) now, (c) once the engine produces one: nothing from the private
+   repo lands in sluice, and "never skip a test" holds, as integration tests are opt-in by design.
+2. **The document changes on disk while mounted** (the engine, or Stephen's editor). **Answer:** at
+   each commit, under the lock, compare the file's inode, size and mtime with those at load; if they
    differ, reload, refuse the write with `EBUSY`, and let the writer retry. Reads reload at `opendir`
-   on a change.* No watcher thread for the pilot.
-3. **How a writer learns why a write failed.** An errno carries no message. *Recommendation: log each
+   on a change. No watcher thread for the pilot.
+3. **How a writer learns why a write failed.** An errno carries no message. **Answer:** log each
    finding (code, JSON Pointer, message) at warning; later, if wanted, a read-only `user.sluice.error`
-   xattr on the leaf.*
-4. **`setattr` on a writable leaf** beyond the size. *Recommendation: accept and ignore times (editors
-   set them), fail mode and owner changes with `EPERM`.*
+   xattr on the leaf.
+4. **`setattr` on a writable leaf** beyond the size. **Answer:** accept and ignore times (editors set
+   them), fail mode and owner changes with `EPERM`.
