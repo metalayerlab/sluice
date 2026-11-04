@@ -7,7 +7,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 license = "Unlicense"
 dependencies = [
-    "interpose @ git+https://github.com/metalayerlab/interpose@v0.4.1",
+    "interpose @ git+https://github.com/metalayerlab/interpose@v0.5.0",
     "pyyaml>=6.0",
     "typer>=0.15",
 ]
