@@ -490,7 +490,7 @@ def _items(lines: list[str], current: list[Any], item: Type | None) -> list[Scal
     type the non-null items share; a declared item type wins over all of these."""
     kinds = [_kind(v) for v in current if v is not None]
     shared = kinds[0] if len(set(kinds)) == 1 else None
-    if len(set(kinds)) > 1 and len(lines) != len(current):
+    if not item and len(set(kinds)) > 1 and len(lines) != len(current):
         # By position, an item would shift into a slot of another type and cast silently
         raise ListTypesError("a list whose items have more than one type can't change length")
     items: list[Scalar] = []

@@ -1020,6 +1020,7 @@ def test_a_declared_item_type_wins_over_position() -> None:
     assert cast(b"3\n4\n", "list", ["a", "b"], item="integer") == [3, 4]
     assert cast(b"3\n", "list", [1], item="string") == ["3"]
     assert cast(b"3\n\n", "list", ["a", "b", "c"], item="string") == ["3", ""]  # Any length
+    assert cast(b"a\nb\nc\n", "list", ["a", 3], item="string") == ["a", "b", "c"]  # Mixed
 
 
 def test_a_large_value_is_checked_at_close_only(tmp_path: Path, mount: Mount) -> None:
