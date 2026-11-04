@@ -2,13 +2,14 @@
 
 <!-- Add a line for this record to the index in docs/design/README.md (CI checks). -->
 
-Status: Proposed
+Status: Approved
 Date: 2026-11-04
 Authors: Stephen Cox; drafted by Claude
+Approved: 2026-11-04 by the arbiter (question "Approve Sluice Record 0012 On YAML Write Edge Cases").
+Supersedes: part of [0011](0011-yaml-projection-pilot.md) (its write rules: a truncating `open` with no `write`, the type of a written list's items, and the check at a write at offset 0)
 
-This record amends [0011](0011-yaml-projection-pilot.md)'s write rules on three points only: a
-truncating `open` with no `write`, the type of a written list's items, and the check at a write at
-offset 0. Everything else in 0011 stands. 0011 is Implemented, so it is amended here, not rewritten
+This record supersedes those three points only; everything else in 0011 stands. 0011 is Implemented, so
+it is superseded in part by a new record, not rewritten
 ([issue #85](https://github.com/metalayerlab/sluice/issues/85)).
 
 ## Context
@@ -103,6 +104,12 @@ The list being replaced types the items written to it, the way 0011 types a leaf
 - **Nulls.** At a position whose current item is null, an empty line stays null, and any other text is
   cast by the type the list's non-null items share, else as a string. At any other position an empty line
   is the empty string in a string slot, and fails the cast elsewhere.
+- **Declared types win.** If a later schema declares a list's item type, that type wins over position,
+  as a declared type wins over a leaf's current value in 0011.
+- **Mixed lists keep their length.** A write that changes the length of a list whose non-null items have
+  more than one type is refused with `EINVAL`, logged like 0011's other refusals (at warning, with the
+  code `list-types` and the JSON Pointer, never the value); such a list can still be edited in place
+  (question 2).
 
 So every unchanged list reads and writes back equal, mixed or not (except an item holding a newline,
 which 0011 already can't write), and the common edits to a list of one type (change, insert, delete,
@@ -116,8 +123,9 @@ mount), so a list of them would keep strings under this rule anyway.
 
 At a `write` at offset 0, the buffer is checked (cast and validate, as now) only when both hold:
 
-1. **The chunk is shorter than 4096 bytes.** With `direct_io` the kernel splits a `write(2)` only where it
-   exceeds the maximum write or the pages one request may carry. The maximum write is never below 4096
+1. **The chunk is shorter than 4096 bytes.** This assumes the default mount limits, which sluice doesn't
+   change (question 4). With `direct_io` the kernel splits a `write(2)` only where it exceeds the maximum
+   write or the pages one request may carry. The maximum write is never below 4096
    bytes, and sluice sets neither limit, so on its mounts a shorter chunk is the whole of one `write(2)`,
    not the first piece of a split one. A fixed limit is used because the handler can't see the limits
    libfuse and the kernel agree on. A chunk of 4096 bytes or more (a large value, or a program writing
@@ -173,45 +181,59 @@ check exists to catch: no rule that looks at one write can tell them apart. The 
   one ending in a split character, is accepted when valid and refused at `close` when not, where it used to
   fail at its first `write` either way.
 - **Version.** A `fix(examples):` PR, so a patch release (0.2.x; before 1.0 the release rules also bump
-  only the patch for a feature). Nothing in `src/` changes; rollback is reverting that PR.
+  only the patch for a feature). The only change in `src/` is the 4096-byte constant, kept beside the
+  mount options (`fuse_options` in `src/sluice/mount.py`) and imported by the example, with a test that
+  fails if either limit it assumes (the maximum write, or the pages per request) is ever set there.
+  Rollback is reverting that PR.
 - **Tests**, in `tests/examples/test_yaml_projection.py` through the `Dispatcher` harness, as 0011's were:
   one per case. `: > leaf` (an `O_TRUNC` open, no write, flush) empties a list and fails with `EINVAL` on
   an integer, the file byte-identical; the toy's mixed `tags` written back unchanged loads equal, and an
   appended item takes the last non-null item's type; a value of 4096 bytes or more written in two chunks,
   and a multi-byte character split across two chunks, both commit at `flush`, while one short bad chunk
-  still fails at `write`. `test_a_handle_that_wrote_nothing_commits_nothing` keeps its `O_WRONLY` case and loses
+  still fails at `write`; a mixed list whose length changes fails with `EINVAL` (`list-types`); a write of
+  an unchanged value leaves the file and its mtime alone; and the mount-limits test above.
+  `test_a_handle_that_wrote_nothing_commits_nothing` keeps its `O_WRONLY` case and loses
   its `O_TRUNC` one, and the "items are strings" cases of the list test change with case 2.
 - **Docs.** The module docstrings of `examples/yaml_projection.py` and `examples/vo_projection.py` ("a
   handle that wrote nothing commits nothing", "its items strings"). Wiki: Writing-an-App (the paragraph
   that tracks issue #85 becomes these rules) and Troubleshooting (the `EINVAL` entry: an empty file, list
-  items, and which writes are checked at `close` only). The code PR adds this record's rejected
+  items, the `list-types` refusal, and which writes are checked at `close` only; and that with two
+  write handles on one leaf, the last to close wins). The code PR adds this record's rejected
   alternatives to TODO.md's "Decided against".
-- **Index.** 0011's row says it is amended by 0012.
+- **Index.** 0011's row says part of it (its write rules on these three points) is superseded by 0012.
 
 ## Open questions
 
-What the arbiter must answer before this is approved, each with a recommendation.
+Answered by the arbiter on 2026-11-04 (question "Approve Sluice Record 0012 On YAML Write Edge Cases"),
+each with the recommendation adopted and the changes it asked for folded in.
 
 1. **A commit whose value equals the current one still rewrites the file.** `flush` dumps and renames even
    when the cast value equals the leaf's current value: case 1 on a null leaf, and case 2's unchanged list,
    so a no-op write can still reformat the file and drop its comments (0011 "YAML library"). Recommend: the
    code PR skips the dump and write-back when the cast value equals the current one (the document validated
-   when it was loaded), so a no-op write leaves the file and its mtime alone.
+   when it was loaded), so a no-op write leaves the file and its mtime alone. **Answer:** as recommended.
+   The skip runs only after 0011's on-disk change check (inode, size and mtime; on a change, reload and
+   `EBUSY`), and compares with the value in the document as reloaded, never a stale copy.
 2. **A mixed list whose length changes.** By position, deleting `alpha` from `[alpha, beta, 3]` shifts `3`
    into `beta`'s string slot, where it casts silently as `"3"`. Recommend: refuse with `EINVAL` (logged as
    code `list-types`) a write that changes the length of a list whose non-null items have more than one type;
    such a list can still be edited in place. v1's writable lists are names (`trustees`), so this binds only
-   free-form values and the toy document.
+   free-form values and the toy document. **Answer:** as recommended, logged like 0011's other refusals
+   (warning, code `list-types`, JSON Pointer); now in the Decision (case 2).
 3. **A failed write's bytes stay in the buffer.** POSIX says a failed `write` transfers nothing; here the
    bytes stay, and `flush` fails on them again. Recommend: keep it, and say so in the docstring: dropping
    them would let case 1's `flush` commit the empty buffer the `O_TRUNC` open left, emptying a list after a
-   refused write.
-4. **The 4096-byte limit.** Recommend: a named constant in `examples/yaml_projection.py`, not a setting,
-   with the chunk sizes confirmed on the first real mount (0011's tests ran through the harness, not
-   FUSE); revisit only if sluice ever learns the negotiated limits.
+   refused write. **Answer:** as recommended.
+4. **The 4096-byte limit.** Recommend: a named constant, not a setting, with the chunk sizes confirmed on
+   the first real mount (0011's tests ran through the harness, not FUSE); revisit only if sluice ever
+   learns the negotiated limits. **Answer:** as recommended. The rule assumes the default mount limits,
+   which sluice doesn't change; the constant is kept beside the mount options, with a test that fails if
+   either limit is set (Consequences).
 5. **An empty file as the empty string on a `string` leaf**, so `: > leaf` empties it. Recommend: no. 0011
    makes 0 bytes null and one newline the empty string, which keeps the two apart on a read; changing that
-   is a change to the serialization, not to these edge cases.
+   is a change to the serialization, not to these edge cases. **Answer:** as recommended: an empty file
+   stays null.
 6. **Two write handles on one leaf.** Each has its own buffer and the last `flush` wins, and an `O_TRUNC`
    open doesn't empty another handle's buffer, unlike a regular file. Recommend: leave it for now (editors
    and shell tools use one handle) and say so in Troubleshooting; a record of its own if it matters.
+   **Answer:** as recommended: the last to close wins, documented in Troubleshooting.
