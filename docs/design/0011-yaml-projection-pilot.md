@@ -16,41 +16,65 @@ document is one organisation record from the Virtual Organisations model (the pr
 
 That model fixes what this record builds on:
 
-- **One document, mostly mappings.** An org record has `kind`, `version`, `org`, `name`, `status`, a
-  verbatim `template` copy, the `seed`, and `results`. Nodes, inputs, outputs, seed declarations and
-  seed values are mappings keyed by id or name. The only sequences are `depends_on` (node ids, written
-  order kept) and `list`-typed values (lists of scalars, order matters: `trustees`). There are no lists
-  of mappings in v1, so no list-identity rule is needed.
+- **One document, mostly mappings.** An org record has exactly `kind`, `version`, `org`, `name`,
+  `status`, a verbatim `template` copy, `seed` (the seed's values, one flat mapping keyed by
+  snake_case key) and `results`. Nodes, inputs, outputs, seed declarations and seed values are
+  mappings keyed by id or name. The only sequences the schema names are `depends_on` (node ids,
+  written order kept) and `list`-typed values (lists of scalars, order matters: `trustees`). `run.with`
+  and `mapping`-typed values are free-form, so the schema doesn't rule out a list of mappings there,
+  but no keyed sequence is part of the model, so no list-identity rule is needed (see [Lists](#lists)).
 - **Declared types.** `string`, `integer`, `boolean`, `date`, `datetime`, `list` (of scalars),
   `mapping`. The template's `seed` section declares each seed value's type; each node's `outputs`
-  declares each result's type.
-- **Fixed now:** the template copy, and `results.<node>.outputs.<key>` beside `results.<node>.status`.
-  The rest of the org record's shape is settled in the engine's later design.
+  declares each result's type. There is no float type, but a float is a scalar to the model, so one
+  can appear where nothing declares a type (`run.with`, a list item).
+- **Fixed now:** the org record's top-level keys (no others allowed), the template copy, `seed` as
+  the flat values, and `results.<node>` as `status` (`done` or `failed`) beside optional
+  `outputs.<key>`. The engine's own design record may settle more.
 - **`results` belong to the engine.** sluice never writes them. Stephen hand-writes templates and seeds.
-- **The loader and validator** are `virtual_organisations.model` (no I/O beyond reading the file it
-  is given): `load_template`/`load_seed`/`load_org(path)` return plain dicts and raise `LoadError` on
-  bad YAML or a duplicate key; `dump(doc)` gives YAML that loads back equal (not byte-identical: pyyaml
-  drops comments); `validate(template, seed=None, *, handlers=None, webhooks=None)` and
-  `validate_org(org)` return `list[Finding(code, path, message)]`, `path` a JSON Pointer, and never
-  raise; `order(template)`; `json_schema(kind, version=1)`. The module isn't built yet: it comes next
-  in that repo, after its record merges.
-- **Public and private.** sluice is public and the model is private. Whether the model goes public is
-  decided before anything in sluice's package needs it (VO 0001, decision 6).
+- **The template copy is read-only.** It is a verbatim copy of the template the record was made from.
+  `validate_org` checks only that the copy is a valid template, not that it still matches its source,
+  so a write there would pass validation and silently fork the record from its template. The
+  coordinator for Virtual Organisations confirmed (2026-11-04) that writes go to seed values only;
+  the engine's record will rule on when a seed value may change after a run.
+- **The loader and validator** are `virtual_organisations.model`, merged in that repo: no engine code
+  and no I/O beyond reading the file it is given.
+  - `load_template`, `load_seed` and `load_org(source)` take a file path (a `Path` or a `str`, never
+    YAML text), return a plain `dict` and don't validate. They raise `LoadError`, whose `code` is
+    `yaml` (not valid YAML), `duplicate-key` (a mapping repeats a key) or `not-a-mapping`, with the
+    file, line and column, and never the file's text.
+  - `dump(doc) -> str` writes block-style YAML with pyyaml's `yaml.dump(..., sort_keys=False)`, so key
+    order is kept, and with no anchors or aliases (a repeated value is written twice). Comments are not
+    kept. It loads back equal, not always byte-identical: quoting and line wrapping are pyyaml's.
+  - `validate(template, seed=None, *, handlers=None, webhooks=None)` and `validate_org(org)` return
+    `list[Finding]`, never raise, and an empty list means valid. A `Finding(code, path, message)` has a
+    rule `code` (`schema`, `cycle`, `seed-type`, ...), a `path` that is a JSON Pointer into the
+    document, and a one-sentence `message`. `validate` puts seed findings under `/values/<key>`;
+    `validate_org` puts the template copy's findings under `/template/...`, seed findings under
+    `/seed/<key>` and result findings under `/results/<node>/...`. A document that fails its JSON
+    Schema gets only `schema` findings.
+  - Also `order(template)`, `json_schema(kind, version=1)` and `VALUE_TYPES`.
+- **Version 1 only.** A version 2 of the VO schema is coming, loaded beside version 1 by each
+  document's `version`; the pilot pins version 1 and refuses to mount any other.
+- **Public and private.** sluice is public and the model is private. The projector is a sluice example
+  that imports the model only when it is installed; whether the model goes public is decided before
+  anything in sluice's package needs it (VO 0001, decision 6).
 
 ### Where the spec differs from sluice and interpose today
 
-Checked against sluice `main` (v0.2.5, on interpose v0.2.2) and interpose designs 0003–0008.
+Checked against sluice `main` (v0.2.5, on interpose v0.2.2) and interpose `main` (designs 0003–0008;
+0009, settings extensions, is approved but unreleased and changes nothing here).
 
 | Spec says | sluice and interpose today | This record |
 |---|---|---|
 | A projector *middleware* registered into the pipeline | interpose's `Pipeline` (sluice 0004) runs middleware *around* an operation; the operation on a path with no backing file is a `VirtualHandler` on a `virtual=True` route | The projector is a `VirtualHandler` on one `{rest*}` route. Middleware (the access layer) wraps it as usual |
 | Resolvers registered per node type via `route`/`use` | Routes match path shapes (literal, `{param}`, `{param*}`), not schema types | One route; the handler dispatches by declared type |
 | Reuse sluice's auth mechanism | No middleware ships in the package (sluice 0002): `auth()` is `examples/auth.py`, whose default `verify` allows everything | The pilot's access layer is `examples/auth.py` unchanged. With `skip_inherited` on (sluice 0010), a `pre`-only gate costs a dict and a set lookup |
-| Validate before commit | A `post` hook runs after the handler has acted, and fails closed with `EIO`, not `EINVAL` (interpose `Policy`, `on_error="fail"`) | Validation is inside the handler, before anything changes. It is not a hook |
+| Validate before commit | A `post` hook runs after the handler has acted. It can fail the call (an `FsError` it raises gives that errno, anything else `EIO`: interpose `Policy`, `on_error="fail"`), but the change has already happened | Validation is inside the handler, before anything changes. It is not a hook |
 | Reject the bad write at the write syscall | `write` gets chunks (`WriteArgs(offset, data)`); `release` bypasses middleware and its errors are ignored; `close(2)` sees `flush`'s error | Checked at `write` (from offset 0) and committed at `flush` (below) |
 | (not in the spec) | `pipeline.timeout_ms` is interpose's per-*hook* timeout (sluice 0006); it doesn't limit the handler, and the handler runs on the one event loop | Blocking work (validation, dump, fsync) runs in a worker thread, so a write doesn't stall the mount |
 | Sequences are directories, entries named by a keyed field | No keyed sequences exist in the v1 model | A sequence of scalars is one file, an item per line |
 | Strict type coercion, as in interpose's settings | interpose coerces configuration text and accepts `1`/`yes`/`on` for true | Not reused: the projector's rule is stricter (below) |
+| A write "breaking a declared dependency" is rejected at the write syscall | Dependencies (`depends_on`, inputs) live in the template copy, which stays read-only | Refused earlier, at `open` (`EACCES`); a type error in a seed value is rejected at `write` |
 | "Round-trips through the template loader" | — | Through `load_org`; equal, not byte-identical |
 | Write path in the pilot | — | Kept in the pilot, as a later PR than the read path (build order) |
 
@@ -62,13 +86,15 @@ Checked against sluice `main` (v0.2.5, on interpose v0.2.2) and interpose design
   (0002):
   - `examples/yaml_projection.py`: the generic projector. A `DocumentStore` (one per document: parse,
     hold, lock, write back) and a `Projection(VirtualHandler)` for a `{rest*}` route. It takes a small
-    `Model` protocol: `load(path) -> dict`, `dump(doc) -> str`, `validate(doc) -> list[(pointer,
-    message)]`, `type_of(pointer, doc) -> Type | None` and `writable(pointer, doc) -> bool`. It imports
-    only sluice and the stdlib, and is tested in sluice's CI with a sluice-owned toy document and a toy
-    pyyaml model.
+    `Model` protocol: `load(path) -> dict`, `dump(doc) -> str`, `validate(doc) -> list[(code,
+    pointer, message)]`, `type_of(pointer, doc) -> Type | None` and `writable(pointer, doc) -> bool`.
+    It imports only sluice and the stdlib, and is tested in sluice's CI with a sluice-owned toy
+    document and a toy pyyaml model.
   - `examples/vo_projection.py`: the Virtual Organisations adapter. It imports
-    `virtual_organisations.model` when it is installed, and fills `Model` from it: `load_org`, `dump`,
-    `validate_org`, types from the template copy's declarations, and the writable set below.
+    `virtual_organisations.model` only when it is installed, and fills `Model` from it: `load_org`,
+    `dump`, `validate_org` (each `Finding` as its code, path and message), seed value types from the
+    template copy's `seed` declarations, and the writable set below. It refuses a record whose
+    `version` isn't 1.
 - **No new dependency.** `pyproject.toml` doesn't change. mypy gets an override for
   `virtual_organisations.*` (`ignore_missing_imports`, with its reason), since CI can't install a
   private repo.
@@ -78,8 +104,12 @@ Checked against sluice `main` (v0.2.5, on interpose v0.2.2) and interpose design
   from auth import auth
   from vo_projection import org_projection
 
-  app.route("/orgs/example-trust/{rest*}", virtual=True,
-            handler=org_projection("/srv/orgs/example-trust.yaml"), middlewares=[auth()])
+  app.route(
+      "/orgs/example-trust/{rest*}",
+      virtual=True,
+      handler=org_projection("/srv/orgs/example-trust.yaml"),
+      middlewares=[auth()],
+  )
   ```
 
   The document's path is the handler's own configuration: a virtual route has no backend.
@@ -89,7 +119,8 @@ Checked against sluice `main` (v0.2.5, on interpose v0.2.2) and interpose design
 **One org record**, through `load_org` and `validate_org`, never a template and seed pair: that would be
 two documents, which the spec puts out of scope, and the VO design expects sluice to mount the org record.
 A template and a seed (which Stephen hand-writes, with comments) are never mounted, so the comments pyyaml
-drops are the engine's, not his.
+drops are the engine's, not his. (The pilot's record, put together before the engine exists, loses any
+comments on its first write.)
 
 ```text
 /orgs/example-trust/
@@ -100,14 +131,15 @@ drops are the engine's, not his.
   template/nodes/<id>/inputs/<name>
   template/nodes/<id>/run/{handler|webhook|approval/question,with/...}
   template/nodes/<id>/outputs/<key>/{type,description}
-  seed/...                              (shape: the engine's record)
+  seed/<key>                            (a key left to its default is absent)
   results/<node>/status
   results/<node>/outputs/<key>
 ```
 
 The document must validate when it is mounted: one with findings is refused at mount, so every later
-write starts from a valid document. Until the engine exists, the pilot's document is an org record made
-by hand from VO's `smallest-charity` template and seed (see [Open questions](#open-questions), 1).
+write starts from a valid document. Until the engine exists, the pilot's document is an org record put
+together from VO's `smallest-charity` template and seed: the template as the copy, the seed's `values`
+as `seed`, empty `results`, `status: creating` (where it is built: [Open questions](#open-questions), 1).
 
 ### Scalar serialization
 
@@ -122,10 +154,12 @@ writes `x`, and read-then-write is lossless (a string that ends in a newline rea
 | `boolean` | `true` or `false` | `true` or `false` only (not `yes`, `on`, `1`) |
 | `date` | `YYYY-MM-DD` | `YYYY-MM-DD` |
 | `datetime` | ISO 8601 with `T`, and the offset if the value has one | ISO 8601 (`datetime.fromisoformat`) |
-| null | an empty file (0 bytes) | 0 bytes, only where the type allows null (nowhere in v1) |
+| float (no declared type) | Python's `repr` (`0.5`) | what `float()` accepts, finite only |
+| null | an empty file (0 bytes) | 0 bytes, only where the type allows null (no declared type does in v1) |
 
 - **The declared type decides, never the text.** A string `true` stays a string. A leaf with no
-  declared type (most template-copy fields) has the type of its current value, and keeps it.
+  declared type (the template copy, results, values inside a `mapping`) has the type of its current
+  value, and keeps it.
 - **"Exactly as in the source YAML" means the same value**, not the same characters: `>-` folding,
   quotes and a `Z` offset (`+00:00` after loading) are YAML spelling, which a scalar's file doesn't show.
 - `getattr` reports the real size (the projector knows the content), mode `0644` for a writable leaf
@@ -136,24 +170,27 @@ writes `x`, and read-then-write is lossless (a string that ends in a newline rea
 - **A sequence of scalars is one regular file, one item per line**, each item followed by a newline and
   serialized by the scalar rule: `[a, b]` reads `a\nb\n`, `[]` reads as an empty file. Order is kept
   both ways. A write replaces the whole list; an item containing a newline can't be written (`EINVAL`).
-- `list` declares no item type in v1, so written items are strings; `depends_on` items are node ids.
-- **A sequence of mappings or sequences** isn't valid in v1: the projector refuses to mount a document
-  that has one. No list-identity rule is needed until the model adds such a list (then a new record).
+- `list` declares no item type in v1, so written items are strings (the model accepts any scalar
+  items, so a list that held numbers holds strings after a write); `depends_on` items are node ids.
+- **A sequence of mappings or sequences** is never declared by the v1 schema, though a free-form value
+  (`run.with`, a `mapping`) could hold one: the projector refuses to mount a document that has one. No
+  list-identity rule is needed until the model declares such a list (then a new record).
 - A `mapping`-typed value is a directory, like any mapping.
 
 ### Writes, in two phases
 
 1. **Read-only first.** `open` for writing, `setattr`, and every shape change fail; nothing changes on
    disk. The read acceptance criteria (`cat`, `ls`) are met here.
-2. **Then writes**, once validation-on-write works, to these leaves only:
-   - `template/nodes/<id>/inputs/<name>` (a reference),
-   - `template/nodes/<id>/outputs/<key>/{type,description}`,
-   - seed values.
+2. **Then writes**, once validation-on-write works, to seed values only: `seed/<key>`, cast by the
+   type the template copy declares for that key (and, inside a `mapping`-typed value, its leaves, each
+   keeping its current type).
 
-   Everything else stays read-only: `kind`, `version`, `org`, `name`, `status` and `results` (the
-   engine's), and the rest of the template copy. A write to a read-only leaf fails with `EACCES` at
-   `open`. Creating, removing or renaming anything (a new key, a new node) fails with `EPERM`: the
-   pilot changes values, not the document's shape.
+   Everything else stays read-only: `kind`, `version`, `org`, `name` and `status`; `results` (the
+   engine's); and the whole template copy, which is a verbatim copy of its source template (see
+   [Context](#context)). A write to a read-only leaf fails with `EACCES` at `open`. Creating, removing
+   or renaming anything (a new key, a new node) fails with `EPERM`: the pilot changes values, not the
+   document's shape. Until the engine's record rules on when a seed value may change after a run,
+   the pilot allows seed writes whatever `status` and `results` say.
 
 **A write, step by step.** `open` gives a handle with a buffer: empty with `O_TRUNC`, else the current
 content. `write` changes the buffer. When a write starts at offset 0 (what `echo`, `printf` and most
@@ -182,16 +219,22 @@ use for finer locks, and per-leaf locks wouldn't help: every write validates the
 
 ### YAML library
 
-**The model's `load_org` and `dump`, so pyyaml, which sluice already depends on.** Not ruamel.yaml. The
-round-trip is equal, not byte-identical: comments and quoting go, which is acceptable for a record the
-engine writes. The projector never parses or emits YAML itself, so its writes can't disagree with the
-model about what the document means.
+**The model's `load_org` and `dump`, so pyyaml, which sluice already depends on.** Not ruamel.yaml.
+`dump` keeps key order (`sort_keys=False`) and writes no anchors, so a write changes the one value and
+leaves the record's order alone. The round-trip is equal, not byte-identical: comments go, and quoting
+and line wrapping are pyyaml's, so the first write to a hand-formatted file can reformat it once;
+after that, writes change only the value. That is acceptable for a record the engine writes. The
+projector never parses or emits YAML itself, so its writes can't disagree with the model about what
+the document means.
 
 ## Alternatives considered
 
 - **A separate filesystem.** Duplicates routing, the auth hook and the access log. Rejected by the spec.
 - **The projector as middleware** (a `pre` hook answering with `ctx.respond`). It would be the
-  operation dressed as a wrapper, and validation in `post` comes after the change and fails with `EIO`.
+  operation dressed as a wrapper, and validation in `post` comes after the change has happened.
+- **Writes to the template copy** (inputs, output declarations). The copy is verbatim and the
+  validator doesn't compare it with its source, so an edit would fork the record from its template
+  unnoticed. The VO coordinator confirmed seed values only.
 - **A package feature** (`sluice.yaml`). sluice ships mechanism, not policy (0002, TODO "Decided
   against"), and the package mustn't depend on a private repo.
 - **Only the VO adapter, no generic projector.** Its tests could never run in sluice's CI (the model
@@ -214,12 +257,16 @@ model about what the document means.
 
 - The idea's build order becomes PRs (below); its deliverables' README section becomes the examples'
   docstrings and a Writing-an-App section, as for the other examples.
-- An edit through the mount loses the record's comments and may reorder keys (pyyaml's `dump`).
+- An edit through the mount loses the record's comments, and the first one may reformat quoting and
+  wrapping; key order is kept (the model's `dump`).
 - Editors that save by writing a new file and renaming it over the old one (vim's default
   `backupcopy=auto` on some files) fail with `EPERM`; `backupcopy=yes`, `echo`, `printf` and `tee` work.
   Troubleshooting says so.
-- Editing the template copy in an org record makes it differ from the source template. VO 0001 calls
-  the copy verbatim: see [Open questions](#open-questions), 2.
+- Only seed values can be changed through the mount. The template copy can't, so the copy stays the
+  template the record was made from; a different graph means a new template and a new record. A seed
+  key left to its default isn't in the record, and adding it is a shape change (`EPERM`).
+- The spec's "a write breaking a declared dependency is rejected at the write syscall" is met at
+  `open` instead: dependencies are in the read-only copy.
 - The adapter's tests need the model installed, so they don't run in sluice's CI (below).
 - Rollback: delete the example files; nothing in `src/` changes.
 - Wiki: Writing-an-App (the projector), Troubleshooting (editors, `EINVAL` on a write), Security (a
@@ -227,23 +274,29 @@ model about what the document means.
 
 ## Build order
 
-One PR each. Steps 2 and 3 wait for `virtual_organisations.model` (built in that repo, by its owner).
+One PR each. `virtual_organisations.model` is merged in that repo, so nothing waits on it.
 
 1. **This record.**
 2. **Generic projector, read-only.** `examples/yaml_projection.py`: store, serialization, lists,
    `getattr`/`readdir`/`open`/`read`, refusing a document with lists of mappings; a toy document and
    model in `tests/examples/`. The `cat` and `ls` criteria on the toy document.
 3. **VO adapter, read-only.** `examples/vo_projection.py`, the mypy override, the mount example; the
-   adapter's tests on a hand-made org record (question 1). The `cat` and `ls` criteria on the pilot.
+   adapter's tests on the pilot's org record (question 1). The `cat` and `ls` criteria on the pilot.
 4. **Generic projector, writes.** Buffers, the cast, check-at-write and commit-at-flush, the lock,
    atomic write-back with the load-back check, `truncate`, the errnos above; toy-model tests for every
    step, a failed write leaving the file byte-identical, and a read → write round-trip for every type.
-5. **VO adapter, writes.** The writable set, types from the declarations, `validate_org`; the
-   remaining acceptance criteria (write-then-read, a type error and a broken dependency rejected with
-   the file unchanged, the result loading through `load_org`).
+5. **VO adapter, writes.** The writable set (seed values), types from the declarations,
+   `validate_org`; the remaining acceptance criteria (write-then-read, a seed type error rejected at
+   `write` with `EINVAL`, a write to a dependency refused at `open` with `EACCES`, the file unchanged
+   in both, the result loading through `load_org`).
 6. **Phase 2, role scoping.** A record of its own, once the pilot holds.
 
 ## Open questions
+
+Answered by the coordinator for Virtual Organisations on 2026-11-04 and folded into the Decision: key
+order in `dump` (kept, `sort_keys=False`), and writes to the template copy (none: seed values only).
+Settled with VO 0001 (decision 6): the projector is a sluice example that imports the model only when
+it is installed.
 
 1. **Where the pilot's org record and the adapter's tests live.** sluice is public, the model private.
    Options: (a) a hand-made org record in sluice's tests, (b) the record built at test time from a VO
@@ -251,19 +304,12 @@ One PR each. Steps 2 and 3 wait for `virtual_organisations.model` (built in that
    VO repo's examples. *Recommendation: (b) now, (c) once the engine produces one*: nothing from the
    private repo lands in a public one before Stephen decides to make it public, and "never skip a test"
    holds, as integration tests are opt-in by design.
-2. **Writes to the template copy.** The coordinator for Virtual Organisations recommends writes to
-   inputs and outputs as well as seed values; VO 0001 calls the copy verbatim. *Recommendation: seed
-   values first (step 5), inputs and output declarations in the same PR only if the VO owner confirms an
-   org record's copy may differ from its source template*; otherwise seed values only.
-3. **The document changes on disk while mounted** (the engine, or Stephen's editor). *Recommendation:
+2. **The document changes on disk while mounted** (the engine, or Stephen's editor). *Recommendation:
    at each commit, under the lock, compare the file's inode, size and mtime with those at load; if they
    differ, reload, refuse the write with `EBUSY`, and let the writer retry. Reads reload at `opendir`
    on a change.* No watcher thread for the pilot.
-4. **How a writer learns why a write failed.** An errno carries no message. *Recommendation: log each
+3. **How a writer learns why a write failed.** An errno carries no message. *Recommendation: log each
    finding (code, JSON Pointer, message) at warning; later, if wanted, a read-only `user.sluice.error`
    xattr on the leaf.*
-5. **Key order in `dump`.** pyyaml's `safe_dump` sorts keys unless told not to, which would reorder
-   the record on every write. *Recommendation: ask the VO owner for `dump` to keep written order
-   (`sort_keys=False`)*; the projector lists keys in document order either way.
-6. **`setattr` on a writable leaf** beyond the size. *Recommendation: accept and ignore times (editors
+4. **`setattr` on a writable leaf** beyond the size. *Recommendation: accept and ignore times (editors
    set them), fail mode and owner changes with `EPERM`.*
