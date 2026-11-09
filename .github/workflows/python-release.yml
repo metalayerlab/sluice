@@ -48,6 +48,26 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+      # release-please 17.6.0, bundled in the pinned action, lists every issue a commit footer
+      # names as ", closes" in the Release PR body, so merging the Release PR closes that issue.
+      # This step says ", refs" instead. Upstream fixed it in release-please 17.10.4
+      # (googleapis/release-please#2851): remove this step once the pinned action bundles it.
+      - name: Keep the Release PR from closing issues
+        if: steps.release.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          # The raw output, parsed in run: Actions evaluates env even when if: skips the step,
+          # and fromJSON fails on the empty output of a run that opens no Release PR.
+          PR_JSON: ${{ steps.release.outputs.pr }}
+        run: |
+          # jq is on GitHub's runners.
+          PR=$(jq -r .number <<<"$PR_JSON")
+          body=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body --jq .body)
+          fixed=${body//, closes /, refs }
+          if [ "$body" = "$fixed" ]; then echo "Release PR #$PR closes no issues"; exit 0; fi
+          printf '%s\n' "$fixed" | gh pr edit "$PR" -R "$GITHUB_REPOSITORY" --body-file -
+          echo "Release PR #$PR: closes -> refs"
+
   # release-please bumps pyproject.toml but not uv.lock, which records the
   # project's version too: refresh it on the Release PR so CI's lock check passes.
   lock:
@@ -63,7 +83,7 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+          ref: ${{ needs.release-please.outputs.pr && fromJSON(needs.release-please.outputs.pr).headBranchName }}
           token: ${{ steps.app-token.outputs.token || github.token }}
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Refresh uv.lock

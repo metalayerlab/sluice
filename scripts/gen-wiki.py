@@ -2,7 +2,7 @@
 """Regenerate the generated sections of docs/wiki/ from the code. Template-owned: template-python.
 
     uv run scripts/gen-wiki.py           # rewrite the sections
-    uv run scripts/gen-wiki.py --check   # CI: fail if any section is stale
+    uv run scripts/gen-wiki.py --check   # CI: fail if any of them is stale
 
 A generated section sits between markers, and everything between them is replaced:
 
@@ -38,8 +38,23 @@ def settings() -> str:
         "|---|---|---|---|",
     ]
     for s in SETTINGS:
-        # A config.py from before list settings (its src/ is the project's) has no is_list.
+        # A config.py from before list settings (its src/ is the project's) has no is_list, and
+        # one on interpose before v0.4.0 has no is_section.
         is_list = bool(getattr(s, "is_list", False))
+        if getattr(s, "is_section", False):
+            # A section (a YAML mapping, or a list of them) is read from its _FILE (a YAML file)
+            # or the config file, never a plain variable; its default is always empty.
+            kind = "A list of sections" if is_list else "A section"
+            default = "*(empty list)*" if is_list else "*(empty)*"
+            note = f" {kind}: YAML, from the config file or the `_FILE` variable's file."
+            variables = f"`{s.env}_FILE`"
+            # A list section with item fields (interpose v0.4.1) also reads indexed variables.
+            fields: tuple[object, ...] = getattr(s, "fields", ())
+            if is_list and fields:
+                variables += f", or `{s.env}_<N>_<FIELD>`"
+                note += " Or item N's fields as indexed variables, N from 0, each with a `_FILE`."
+            rows.append(f"| `{s.key}` | {variables} | {default} | {_cell(s.help)}{note} |")
+            continue
         empty = "*(empty list)*" if is_list else "*(none)*"
         default = empty if s.default == "" else f"`{s.default}`"
         listed = " A list: YAML, or comma-separated." if is_list else ""

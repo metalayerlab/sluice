@@ -21,6 +21,7 @@ Releases are automated by [release-please](https://github.com/googleapis/release
 | `build:`, `ci:`, `test:`, `chore:` | none on their own | hidden |
 
 - The *PR title* check enforces the format. A wrong type means a wrong version, so reviewers check it.
+- **Issues in a commit footer:** to mention an issue that should stay open, write `Refs: <owner>/<repo>#N`, never `Refs #N`. release-please prints any `#N` footer as "closes" in the Release PR, and merging it would close the issue; the *Release* workflow also rewrites that "closes" to "refs".
 - The version lives in `pyproject.toml` and `.release-please-manifest.json`; `sluice.__version__` reads the installed metadata. CI fails if the two files disagree.
 
 ## How a release happens
