@@ -1,6 +1,10 @@
 # Template-owned: template-container. Deletes branch images (dev-*, feat-*, and their -<sha>
 # variants) older than 7 days from GHCR. Scoped to those tag patterns, so it
 # never touches latest, edge, main or release tags.
+#
+# Token: secrets.PACKAGES_DELETE_TOKEN if set, else GITHUB_TOKEN (see the step). The
+# secret is a classic personal access token with read:packages and delete:packages:
+# GitHub Packages takes no fine-grained or GitHub App token, GITHUB_TOKEN aside.
 name: Docker image cleanup
 
 on:
@@ -23,9 +27,11 @@ jobs:
       - uses: snok/container-retention-policy@d3bdcf5ce9b05f685154e4a16c39233b245e3d53 # v3.1.0
         with:
           account: metalayerlab
-          # GITHUB_TOKEN can delete versions only if the package grants this repo's
-          # Actions the Admin role (package settings -> Manage Actions access).
-          # Otherwise set PACKAGES_DELETE_TOKEN (a token with delete:packages).
+          # GITHUB_TOKEN fetches this image by name and deletes its versions when the
+          # package grants this repository's Actions the Admin role, which it has by
+          # default when container-build.yml published it (Package settings -> Manage
+          # Actions access). Otherwise set PACKAGES_DELETE_TOKEN: a classic PAT with
+          # read:packages and delete:packages.
           token: ${{ secrets.PACKAGES_DELETE_TOKEN || secrets.GITHUB_TOKEN }}
           image-names: sluice
           image-tags: "dev-* feat-*"
