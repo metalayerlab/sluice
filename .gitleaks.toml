@@ -1,7 +1,7 @@
 # gitleaks: the default rules, plus allow-listed false positives. Add an entry
 # with a comment saying why, never a blanket path.
 [extend]
-useDefault = true
+path = ".gitleaks.base.toml"
 
 [allowlist]
 description = "Known non-secrets"

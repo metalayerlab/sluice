@@ -1,0 +1,12 @@
+# Template-owned: template-base. Change it there and pull it in with `copier update`.
+# gitleaks' default rules plus base's allow-list. The project's own entries go in
+# .gitleaks.toml, which extends this file (template-base decision 0006).
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "template-base: known non-secrets"
+paths = [
+  # lock files: integrity hashes look like secrets
+  '''(^|/)(uv\.lock|pnpm-lock\.yaml|package-lock\.json)$''',
+]

@@ -26,6 +26,7 @@ T = template-owned: never edit here; fixes arrive by update PR. A bug in one goe
 |---|---|
 | `.agents/stack.md` | This project's stack: map, conventions, checks (T) |
 | `.github/workflows/`, `scripts/` | CI and its scripts (T), except what `.agents/stack.md` marks as the project's |
+| `.gitleaks.toml` | The secret scan's allow-list: the project's own entries, each with why. It extends `.gitleaks.base.toml` (T) |
 | `.copier-answers.*.yml` | Copier only |
 
 ## Never

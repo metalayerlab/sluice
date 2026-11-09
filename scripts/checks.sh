@@ -1,7 +1,8 @@
 #!/bin/sh
 # Template-owned: template-base. The Definition of done's checks: every template's
 # scripts/checks.d/*.sh, in name order (00-base first), stopping at the first failure.
-# CI's `checks` job and AGENTS.md run this. A template adds checks by adding a file.
+# CI's `checks` job and AGENTS.md run this. A template adds checks by adding a file,
+# numbered 00-89; a project adds its own as 9N-project-<what>.sh, unmarked (decision 0008).
 # A check may assume sh, python3, git and uv, and in CI the runner image's tools: one
 # that needs docker skips locally and fails in CI. A missing tool fails, naming it.
 set -eu
