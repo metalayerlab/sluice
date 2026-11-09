@@ -3,9 +3,10 @@
 # and can be reverted on its own. Base first, then the stack overlay, then feature
 # overlays by name. Conflicts are left inline as <<<<<<< markers, listed in the PR.
 #
-# The token, best first: the pin-bump GitHub App when PIN_BUMP_APP_CLIENT_ID is set
-# (it has the workflows permission), else the release App when RELEASE_APP_CLIENT_ID
-# is set, else GITHUB_TOKEN. An App's PR runs CI, and an App can read a private
+# The token, best first (template-base's decision 0004): the update role's GitHub App
+# when UPDATE_APP_CLIENT_ID is set (or, until it's removed, the legacy PIN_BUMP_APP_*),
+# with the workflows permission; else the release role's App when RELEASE_APP_CLIENT_ID
+# is set; else GITHUB_TOKEN. An App's PR runs CI, and an App can read a private
 # template. Only the first can push a change to .github/workflows/: with the others,
 # an update that touches them opens an issue asking for a local `copier update`, and
 # so does a push or PR that fails anyway.
@@ -49,26 +50,31 @@ jobs:
       matrix:
         answers: ${{ fromJSON(needs.plan.outputs.templates) }}
     steps:
-      # An App with the workflows permission (the pin-bump App, template-base's decision 0002).
+      # The update role: an App with the workflows permission (Courier, template-base's decisions 0002, 0004).
       - id: workflows-app
-        if: vars.PIN_BUMP_APP_CLIENT_ID != ''
+        if: (vars.UPDATE_APP_CLIENT_ID != '' || vars.PIN_BUMP_APP_CLIENT_ID != '')
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
-          client-id: ${{ vars.PIN_BUMP_APP_CLIENT_ID }}
-          private-key: ${{ secrets.PIN_BUMP_APP_PRIVATE_KEY }}
+          # The role's names first, else the legacy ones, as a pair (decision 0004).
+          client-id: ${{ vars.UPDATE_APP_CLIENT_ID || vars.PIN_BUMP_APP_CLIENT_ID }}
+          private-key: ${{ vars.UPDATE_APP_CLIENT_ID != '' && secrets.UPDATE_APP_PRIVATE_KEY || secrets.PIN_BUMP_APP_PRIVATE_KEY }}
+          # The owner's whole installation, so the token can read a private template too.
           owner: ${{ github.repository_owner }}
           permission-contents: write
           permission-pull-requests: write
           permission-workflows: write
 
-      # Else the release App, taken to lack the workflows permission: it may move tags, so it stays narrow.
+      # Else the release role, never with the workflows permission: it may move tags, so it stays narrow.
       - id: release-app
-        if: vars.PIN_BUMP_APP_CLIENT_ID == '' && vars.RELEASE_APP_CLIENT_ID != ''
+        if: vars.UPDATE_APP_CLIENT_ID == '' && vars.PIN_BUMP_APP_CLIENT_ID == '' && vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          # The owner's whole installation, so the token can read a private template too.
           owner: ${{ github.repository_owner }}
+          permission-contents: write
+          permission-pull-requests: write
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -190,7 +196,7 @@ jobs:
             WHY_LOCAL="couldn't be pushed or its PR opened (see [the run](${RUN})). GitHub refuses a change to \`.github/workflows/\` from a token without the \`workflows\` permission."
           fi
           title="chore: update from ${TEMPLATE} ${TO} (run locally)"
-          body="${TEMPLATE} **${FROM}** → **${TO}** ${WHY_LOCAL} Run \`uvx copier update -a ${ANSWERS} --trust --skip-tasks --conflict inline\` then \`sh scripts/post-update.sh\` locally and open the PR, or give this repository a GitHub App with the \`workflows\` permission (the variable \`PIN_BUMP_APP_CLIENT_ID\` and the secret \`PIN_BUMP_APP_PRIVATE_KEY\`)."
+          body="${TEMPLATE} **${FROM}** → **${TO}** ${WHY_LOCAL} Run \`uvx copier update -a ${ANSWERS} --trust --skip-tasks --conflict inline\` then \`sh scripts/post-update.sh\` locally and open the PR, or give this repository a GitHub App with the \`workflows\` permission (the variable \`UPDATE_APP_CLIENT_ID\` and the secret \`UPDATE_APP_PRIVATE_KEY\`)."
           n=$(gh issue list --label template-update --state open --search "in:title ${TEMPLATE}" --json number -q '.[0].number')
           if [ -n "$n" ]; then gh issue edit "$n" --title "$title" --body "$body"
           else gh issue create --label template-update --title "$title" --body "$body"; fi
