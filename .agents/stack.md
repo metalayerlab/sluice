@@ -14,7 +14,7 @@ Python >= 3.13 with uv: always `uv run`, never `pip install` or activate the ven
 | Task | Command |
 |---|---|
 | Install / add | `uv sync` / `uv add <pkg>` (dev: `--dev`) |
-| Lint, format | `uv run ruff check --fix`, `uv run ruff format` |
+| Lint, format | `uv run ruff check --fix`, `uv run ruff format` (also the `python` code blocks in `*.md`: design records' sketches too) |
 | Types (strict) | `uv run mypy` |
 | Tests (80% floor) / integration | `uv run pytest` / `RUN_INTEGRATION=1 uv run pytest -m integration --no-cov` |
 | Wiki sections | `uv run scripts/gen-wiki.py` |
