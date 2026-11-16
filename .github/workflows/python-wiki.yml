@@ -53,16 +53,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The wiki repository exists only once its first page has been created in
-      # the web UI (one-off; see template-python's README).
+      # the web UI (one-off; see template-python's README). Until then the step
+      # skips with a notice; any other failure to reach it (auth, network) fails.
       - name: Mirror docs/wiki/ to ${{ github.repository }}.wiki
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           url="https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git"
-          if ! git clone --depth 1 "$url" "$RUNNER_TEMP/wiki"; then
-            echo "::error::No wiki repository yet: enable the wiki and create its first page once in the web UI"
+          if ! git ls-remote --quiet "$url" >/dev/null 2>"$RUNNER_TEMP/ls-remote.err"; then
+            cat "$RUNNER_TEMP/ls-remote.err" >&2
+            if grep -q "Repository not found" "$RUNNER_TEMP/ls-remote.err"; then
+              echo "::notice::No wiki repository yet, so nothing to publish: enable the wiki and create its first page once in the web UI"
+              exit 0
+            fi
+            echo "::error::Could not reach the wiki repository"
             exit 1
           fi
+          git clone --depth 1 "$url" "$RUNNER_TEMP/wiki"
           cd "$RUNNER_TEMP/wiki"
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -r "$GITHUB_WORKSPACE"/docs/wiki/. .

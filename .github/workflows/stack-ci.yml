@@ -29,7 +29,7 @@ jobs:
       # dependencies that build from source. None listed: nothing is installed.
       - name: System packages
         run: |
-          if grep -q '^build:.*[^[:space:]]' contrib/system-packages.txt; then
+          if grep -q '^build:.*[^[:space:]]' contrib/system-packages.txt && command -v apt-get >/dev/null && sudo -n true 2>/dev/null; then
             sudo apt-get update
             sed -n 's/^build://p' contrib/system-packages.txt | xargs sudo apt-get install -y --no-install-recommends
           fi
@@ -75,7 +75,7 @@ jobs:
       # `runtime:` for the tests to use them.
       - name: System packages
         run: |
-          if grep -qE '^(build|runtime):.*[^[:space:]]' contrib/system-packages.txt; then
+          if grep -qE '^(build|runtime):.*[^[:space:]]' contrib/system-packages.txt && command -v apt-get >/dev/null && sudo -n true 2>/dev/null; then
             sudo apt-get update
             sed -nE 's/^(build|runtime)://p' contrib/system-packages.txt | xargs sudo apt-get install -y --no-install-recommends
           fi
